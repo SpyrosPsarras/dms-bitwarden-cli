@@ -239,13 +239,19 @@ The runner builds the SSH helper with its locked Cargo dependencies, runs the No
 - `DmsUi/`: MIT controls adapted from Omarchy, with DMS theme and popout bindings.
 - `BitwardenModel.js`: original CLI/model logic with DMS host commands.
 
-Reload after ordinary edits:
+After editing `plugin.json`, `Daemon.qml`, `BarWidget.qml` or `Settings.qml`:
 
 ```sh
 dms ipc call plugin-scan reload bitwarden
 ```
 
-DMS reloads the entry component with a cache-busting URL, but imported QML/JavaScript may remain cached. After changing imported controls or the model, restart DMS to load the complete new version. Reloading/removing the daemon locks its active vault; the CLI account stays signed in.
+That reloads the entry components, not what they import. An edit to `Panel.qml` keeps running the old code after `plugin-scan reload`, `plugins reload`, or `plugins disable` and `enable`, with no error or log line to say so; expect the same for `Service.qml`, `DmsUi/` and `BitwardenModel.js`. After editing any of those, restart DMS:
+
+```sh
+dms restart
+```
+
+Reloading, restarting or removing the daemon locks its active vault; the CLI account stays signed in.
 
 ## Uninstall
 
