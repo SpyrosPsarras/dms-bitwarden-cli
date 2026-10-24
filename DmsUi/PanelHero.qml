@@ -19,7 +19,7 @@ Item {
   // space itself, so callers never do the geometry.
   property Component trailingControl: null
 
-  readonly property color dim: Qt.darker(foreground, 1.4)
+  readonly property color dim: DmsColor.secondary
   readonly property real trailingInset: trailingLoader.item && trailingLoader.item.visible ? trailingLoader.width + Style.space(12) : 0
 
   width: parent ? parent.width : implicitWidth

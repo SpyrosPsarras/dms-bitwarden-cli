@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Material
 import QtQuick.Controls as QQC
 import "DmsUi"
 
@@ -97,7 +98,7 @@ Column {
     textFormat: Text.PlainText
     visible: root.label !== ""
     text: root.label
-    color: Qt.darker(root.foreground, 1.4)
+    color: DmsColor.secondary
     font.family: root.fontFamily
     font.pixelSize: Style.font.bodySmall
   }
@@ -111,6 +112,16 @@ Column {
     stepSize: root.stepSize
     value: root.value
     editable: false
+    Material.theme: DmsColor.light ? Material.Light : Material.Dark
+    Material.accent: root.accent
+    Material.foreground: root.foreground
+    Material.background: DmsColor.background
+    palette.text: root.foreground
+    palette.buttonText: root.foreground
+    palette.highlight: root.accent
+    palette.highlightedText: root.foreground
+    palette.base: DmsColor.background
+    palette.button: Style.normalFillFor(root.foreground, root.accent)
     font.family: root.fontFamily
     font.pixelSize: root.fontSize
 

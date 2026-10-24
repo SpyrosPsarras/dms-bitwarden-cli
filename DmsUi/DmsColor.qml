@@ -3,6 +3,8 @@ import QtQuick
 import qs.Common
 QtObject {
     readonly property color foreground: Theme.surfaceText
+    readonly property color secondary: Theme.surfaceVariantText
+    readonly property bool light: Theme.isLightMode
     readonly property color background: Theme.surface
     readonly property color accent: Theme.primary
     readonly property color urgent: Theme.error

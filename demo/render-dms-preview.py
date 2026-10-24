@@ -4,6 +4,7 @@ from pathlib import Path
 import re,shutil,json,subprocess,os,tempfile,argparse
 repo=Path(__file__).resolve().parents[1]
 parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--theme', choices=('dark', 'light'), default='dark')
 parser.add_argument('--screen', choices=('vault', 'login'), default='vault')
 parser.add_argument('--smoke-daemon', action='store_true', help='Load the complete daemon with disposable environment and failing CLI stubs')
 parser.add_argument('--test-ui', action='store_true', help='Run bounded fields and approval UI tests with native DMS controls')
@@ -25,16 +26,28 @@ shutil.copytree(repo/'DmsUi',tmp/'DmsUi',dirs_exist_ok=True)
 # Load the actual installed native controls; never start host services.
 dms=args.dms_dir
 if dms is None:
- candidates=sorted(Path('/run/user/'+str(os.getuid())+'/danklinux-shell').glob('*/DankCommon'),key=lambda p:p.stat().st_mtime,reverse=True)
+ candidates=sorted(Path('/run/user/'+str(os.getuid())+'/danklinux-shell').glob('*/Common'),key=lambda p:p.stat().st_mtime,reverse=True)
  if not candidates: raise SystemExit('Pass --dms-dir pointing to the installed DMS shell directory')
  dms=candidates[0].parent
-for sub in ('Widgets','DankCommon/Widgets'):
+common_name = 'DCommon' if (dms/'DCommon').is_dir() else 'DankCommon'
+for sub in ('Widgets',common_name+'/Widgets'):
  shutil.copytree(dms/sub,tmp/sub,dirs_exist_ok=True)
-common=tmp/'DankCommon/Common';common.mkdir(parents=True)
-for name in ('Style','Appearance','Fonts','Anims','DankAnim','DankColorAnim'):
- shutil.copy(dms/'DankCommon/Common'/f'{name}.qml',common/f'{name}.qml')
+common=tmp/common_name/'Common';common.mkdir(parents=True)
+animation_names = ('DAnim','DColorAnim') if common_name == 'DCommon' else ('DankAnim','DankColorAnim')
+singleton_names = ['Style','Appearance','Fonts','Anims','I18n']
+extra_names = ['SpringMotion','ElevationShadow','FontSource'] if common_name == 'DCommon' else []
+for name in ['Style','Appearance','Fonts','Anims',*animation_names,*extra_names]:
+ shutil.copy(dms/common_name/'Common'/f'{name}.qml',common/f'{name}.qml')
+for source in (dms/common_name/'Common').glob('*.js'):
+ shutil.copy(source,common/source.name)
 (common/'I18n.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject { readonly property bool isRtl: false }')
-(common/'qmldir').write_text(''.join(f'singleton {n} 1.0 {n}.qml\n' for n in ('Style','Appearance','Fonts','Anims','I18n')) + 'DankAnim 1.0 DankAnim.qml\nDankColorAnim 1.0 DankColorAnim.qml\n')
+(common/'qmldir').write_text(''.join(f'singleton {n} 1.0 {n}.qml\n' for n in singleton_names) + ''.join(f'{n} 1.0 {n}.qml\n' for n in (*animation_names,*extra_names)))
+fonts=dms/common_name/'assets/fonts'
+if fonts.is_dir(): shutil.copytree(fonts,tmp/common_name/'assets/fonts',dirs_exist_ok=True)
+# Bind the native kit to the same disposable theme as the plugin.
+style_file=common/'Style.qml'
+style_file.chmod(0o600)
+style_file.write_text(style_file.read_text().replace('import QtQuick\n','import QtQuick\nimport qs.Common as Preview\n',1).replace('property var theme: null','property var theme: Preview.Theme'))
 
 # Locate QML blocks without treating braces in strings/comments as syntax.
 tokens=re.compile(r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|[{}]')
@@ -67,12 +80,14 @@ if not args.smoke_daemon:
 (tmp/'Common/Theme.qml').write_text('''pragma Singleton
 import QtQuick
 QtObject {
- readonly property color primary: "#cbb7ff"
- readonly property color surface: "#141219"
- readonly property color surfaceText: "#e9e0f1"
- readonly property color surfaceContainer: "#201c28"
- readonly property color surfaceContainerHigh: "#302939"
- readonly property color outline: "#53495f"
+ property bool isLightMode: false
+ readonly property color surfaceVariantText: isLightMode ? "#49454f" : "#cac4d0"
+ readonly property color primary: isLightMode ? "#006b5f" : "#cbb7ff"
+ readonly property color surface: isLightMode ? "#fff8f5" : "#141219"
+ readonly property color surfaceText: isLightMode ? "#201b16" : "#e9e0f1"
+ readonly property color surfaceContainer: isLightMode ? "#f2ede5" : "#201c28"
+ readonly property color surfaceContainerHigh: isLightMode ? "#eae5dd" : "#302939"
+ readonly property color outline: isLightMode ? "#7b756d" : "#53495f"
  readonly property color error: "#ffb4ab"
  readonly property string fontFamily: "JetBrainsMono Nerd Font"
  readonly property real cornerRadius: 16
@@ -86,6 +101,11 @@ QtObject {
  readonly property real iconSize: 20
  function withAlpha(c,a) { return Qt.rgba(c.r,c.g,c.b,a); }
 }''')
+if args.theme == 'light':
+ theme_file=tmp/'Common/Theme.qml'
+ theme_file.write_text(theme_file.read_text().replace('property bool isLightMode: false','property bool isLightMode: true'))
+(tmp/'Common/Deprecation.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject { function type() {} }')
+with (tmp/'Common/qmldir').open('a') as f: f.write('singleton Deprecation 1.0 Deprecation.qml\n')
 (tmp/'Common/SettingsData.qml').write_text('''pragma Singleton
 import QtQuick
 QtObject { function getPluginSettingsForPlugin(id) { return {autoLockMinutes:0,rememberSession:false,suggestOnOpen:false}; } }''')
@@ -199,11 +219,11 @@ env['QT_QUICK_CONTROLS_STYLE']=args.controls_style
 if args.check_controls or args.test_ui:
  # QtTest runs the real controls without Quickshell's host module loader.
  (tmp/'qs').symlink_to(tmp, target_is_directory=True)
- for folder in ('Widgets','DankCommon/Widgets'):
+ for folder in ('Widgets',common_name+'/Widgets'):
   (tmp/folder).chmod(0o700)
   if (tmp/folder/'qmldir').exists(): (tmp/folder/'qmldir').chmod(0o600)
   (tmp/folder/'qmldir').write_text('module qs.'+folder.replace('/','.')+'\n'+''.join(f'{f.stem} 1.0 {f.name}\n' for f in (tmp/folder).glob('*.qml')))
- for folder in ('Common','DankCommon/Common'):
+ for folder in ('Common',common_name+'/Common'):
   directory=tmp/folder/'qmldir'
   directory.write_text('module qs.'+folder.replace('/','.')+'\n'+directory.read_text())
  for name in ('Style','Appearance','Fonts','Anims'):

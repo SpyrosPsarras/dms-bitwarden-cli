@@ -117,6 +117,10 @@ BorderSurface {
     anchors.fill: parent
     text: ""
     activeFocusOnTab: false
+    // DMS 2 uses a focusable Control; the adapter owns keyboard focus.
+    Component.onCompleted: {
+      if (nativeButton.focusPolicy !== undefined) nativeButton.focusPolicy = Qt.NoFocus
+    }
     backgroundColor: root.selected || root.active || root.hasCursor
       ? Style.selectedFillFor(root.foreground, root.accent) : root.background
     textColor: root.foreground

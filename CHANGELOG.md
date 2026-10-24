@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.6-dms.4] - 2026-10-24
+
+- Merge PRs #7–#10: center Material input hints, stop hidden spinners, stabilize sticky settings headings and clarify when DMS must restart.
+- Follow DMS light/dark, accent and secondary-text colors in input controls and labels instead of mixing system palettes or darkening text.
+- Keep reveal buttons from taking input focus with DMS 2 controls.
+- Support DCommon and DankCommon in the isolated preview runner; test live palette changes and both native control generations.
+
 ## [1.11.6-dms.3] - 2026-10-18
 
 ### Added

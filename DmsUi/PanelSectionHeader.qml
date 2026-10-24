@@ -15,7 +15,7 @@ Text {
   // here. AutoText would let a section title that happens to carry a device or
   // network name promote itself to rich text.
   textFormat: Text.PlainText
-  color: Qt.darker(foreground, 1.4)
+  color: DmsColor.secondary
   font.family: fontFamily
   font.pixelSize: fontSize
   font.bold: true

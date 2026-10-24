@@ -1,6 +1,6 @@
 # Bitwarden Dankbar
 
-> Version 1.11.6-dms.3: security core ported from upstream 1.11.6. Build all three
+> Version 1.11.6-dms.4: security core ported from upstream 1.11.6. Build all three
 > helpers after updating with [**Build helpers**](docs/vault-helper.md#if-the-helper-is-missing-or-fails)
 > or `./scripts/build-helpers.sh`. DMS runs only local builds;
 > a missing or failed vault helper keeps the vault locked.
@@ -137,6 +137,12 @@ python3 demo/render-dms-preview.py --check-layout --panel-width 520 --output /tm
 python3 demo/render-dms-preview.py --test-ui --controls-style Material
 ```
 
+
+### Theme colors
+
+The panel follows the active DMS theme, including light/dark mode, accent and secondary text. Input controls use the DMS palette even when Qt uses the Material style. After an update, restart DMS to clear imported QML caches. A different theme on another computer will intentionally produce different colors.
+
+Fixture previews support `--theme light` or `--theme dark`; `--dms-dir` accepts both the DankCommon and DCommon layouts.
 
 ## Fingerprint unlock
 

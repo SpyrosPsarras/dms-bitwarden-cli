@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Material
 import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
@@ -499,6 +500,16 @@ FocusScope {
     font.family: Style.font.family
     font.pixelSize: Style.font.body
     placeholderText: ""
+    Material.theme: DmsColor.light ? Material.Light : Material.Dark
+    Material.accent: root.accent
+    Material.foreground: root.foreground
+    Material.background: DmsColor.background
+    palette.text: root.foreground
+    palette.buttonText: root.foreground
+    palette.highlight: root.accent
+    palette.highlightedText: root.foreground
+    palette.base: DmsColor.background
+    palette.button: Style.normalFillFor(root.foreground, root.accent)
     Accessible.name: root.placeholderText
     color: root.foreground
     selectionColor: root.password ? "transparent" : root.selectionTint

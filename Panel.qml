@@ -268,7 +268,7 @@ Item {
   readonly property color fg: bar ? bar.foreground : DmsColor.foreground
   readonly property color urgent: bar ? bar.urgent : DmsColor.urgent
   readonly property color accent: DmsColor.accent
-  readonly property color dim: Qt.darker(fg, 1.5)
+  readonly property color dim: DmsColor.secondary
   readonly property color barIconColor: {
     var base = bar ? bar.barForeground : DmsColor.foreground
     if (root.vault.status === "unlocked") return DmsColor.accent
@@ -3640,7 +3640,7 @@ Item {
                         // Only worth showing when it is not already implied by the filter.
                         visible: Boolean(itemData.folderId) && root.vault.selectedFolder === "all"
                         text: "· 󰉋 " + Model.folderName(root.vault.folders, itemData.folderId)
-                        color: Qt.darker(root.dim, 1.1)
+                        color: root.dim
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.caption
                         elide: Text.ElideRight
