@@ -492,6 +492,8 @@ FocusScope {
     verticalAlignment: TextEdit.AlignVCenter
     selectByMouse: !root.password
     clip: true
+    // No floating placeholder, so Material's clipping inset is unnecessary.
+    topInset: 0
     implicitHeight: Math.ceil(font.pixelSize + topPadding + bottomPadding)
 
     font.family: Style.font.family

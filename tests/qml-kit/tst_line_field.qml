@@ -122,6 +122,40 @@ TestCase {
     }
   }
 
+  // This catches the bug only with --controls-style Material; Basic already has topInset 0.
+  function test_inline_content_is_centred_on_background_data() {
+    return [
+      { tag: "normal-hint", masked: false, filled: false },
+      { tag: "normal-text", masked: false, filled: true },
+      { tag: "masked-hint", masked: true, filled: false },
+      { tag: "masked-text", masked: true, filled: true }
+    ]
+  }
+
+  function test_inline_content_is_centred_on_background(data) {
+    var field = data.masked ? secret : plain
+    field.placeholderText = "Search vault..."
+    field.forceActiveFocus()
+    if (data.filled) {
+      keyClick(Qt.Key_A)
+      tryCompare(field, "text", "a")
+    }
+    var ed = editorOf(field)
+    tryVerify(function() {
+      var backgroundMid = ed.background.mapToItem(field, 0, ed.background.height / 2).y
+      var contentMid
+      if (data.filled) {
+        var cursor = ed.cursorRectangle
+        contentMid = ed.mapToItem(field, 0, cursor.y + cursor.height / 2).y
+      } else {
+        var hints = visibleHints(field, field.placeholderText)
+        if (hints.length !== 1) return false
+        contentMid = hints[0].mapToItem(field, 0, hints[0].height / 2).y
+      }
+      return Math.abs(contentMid - backgroundMid) <= 1
+    }, 500, "inline content must be within 1 px of the background's vertical centre")
+  }
+
   function test_login_callers_can_handle_textEdited() {
     var field = Qt.createQmlObject('import QtQuick; import "../.."; LineField { property string editedValue: ""; onTextEdited: editedValue = text }', tc)
     field.insertPlainPaste("login-value")
