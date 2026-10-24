@@ -180,7 +180,8 @@ BorderSurface {
         to: 360
         duration: 900
         loops: Animation.Infinite
-        running: root.iconSpinning
+        // A hidden or unparented button must not spin: an endless animation keeps every shell window repainting
+        running: root.iconSpinning && root.visible && (root.Window.window ? root.Window.window.visible : false)
       }
     }
 
