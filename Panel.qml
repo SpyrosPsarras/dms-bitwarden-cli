@@ -2441,15 +2441,18 @@ Item {
 
                 readonly property bool isGroup: modelData.kind === "group"
 
-              // The heading the pinned bar is showing collapses, and the one it
-              // replaces reappears at once, so the content height is stable.
+              // The heading the pinned bar is showing. It keeps its row and
+              // only drops its ink: updateSettingsSticky reads row.y, and a
+              // row that collapsed because it was chosen moves every row
+              // below it, which changes the choice, which restores the row.
+              // That feedback loop flickered the whole panel every frame.
               readonly property bool yieldsToBar: isGroup
                 && Boolean(root.settingsStickyEntry)
                 && root.settingsStickyEntry.group === modelData.group
 
                 // Breathing room above each heading, except the first.
                 Item {
-                  visible: isGroup && index > 0 && !yieldsToBar
+                  visible: isGroup && index > 0
                   width: parent.width
                   height: visible ? Style.space(18) : 0
                 }
@@ -2457,9 +2460,10 @@ Item {
                 // Headings are rows of their own so the pinned bar can find
                 // them by delegate geometry.
                 Item {
-                  visible: isGroup && !yieldsToBar
+                  visible: isGroup
                   width: parent.width
                   height: visible ? Style.space(22) : 0
+                  opacity: yieldsToBar ? 0 : 1
 
                   PanelSectionHeader {
                     textFormat: Text.PlainText

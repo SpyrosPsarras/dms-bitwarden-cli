@@ -95,22 +95,17 @@ check("the in-list heading yields to the bar rather than drawing alongside it",
   /readonly property bool yieldsToBar: isGroup[\s\S]{0,140}root\.settingsStickyEntry\.group === modelData\.group/.test(panelSrc),
   "the pinned section's own heading must not be drawn twice")
 
-// Going transparent hid the ink and kept the space, which left a
-// heading-sized hole directly under the bar. It gives up the row instead.
-check("it yields its space, not just its ink",
-  /visible: isGroup && !yieldsToBar/.test(panelSrc)
-    && !/opacity: \(root\.settingsStickyEntry/.test(panelSrc),
-  "a transparent row leaves a gap where the heading was")
+// The sticky choice is computed from row.y. A row that collapses because it
+// was chosen moves the rows below it, which changes the choice, which
+// restores the row: a per-frame flicker. So it yields its ink, never its space.
+check("it yields its ink, not its space",
+  /opacity: yieldsToBar \? 0 : 1/.test(panelSrc)
+    && (panelSrc.match(/yieldsToBar/g) || []).length === 2,
+  "collapsing the chosen heading moves the geometry the choice was made from")
 
-check("the gap above it goes too",
-  /visible: isGroup && index > 0 && !yieldsToBar/.test(panelSrc),
-  "the spacer above a hidden heading would leave a smaller hole in its place")
-
-// Exactly one heading is ever yielding, so the content height is constant:
-// the one taking over collapses as the previous one is restored.
-check("only the pinned section's heading yields, so the height stays constant",
-  /content height is stable/.test(panelSrc),
-  "expected the reasoning recorded where the next reader will be standing")
+check("the loop is explained where the next reader will be standing",
+  /feedback loop flickered/.test(panelSrc),
+  "expected the reasoning recorded next to yieldsToBar")
 
 check("and only while part of that section is still on screen",
   /if \(top < settingsSectionEnd\(i\)\)/.test(panelSrc),
