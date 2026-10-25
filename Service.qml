@@ -230,7 +230,18 @@ Item {
   property bool setupWasGated: false
   property string settingsFlash: ""
   property int settingsIndex: 0
-  readonly property var settingsEntries: Model.visibleSettings(dependencies, depsChecked)
+  readonly property var settingsEntries: Model.visibleSettings(dependencies, depsChecked,
+    function(key) { return root.settingValue(Model.settingSchemaEntry(key)) })
+  // A row can disappear under the cursor (a setting hides another); keep the
+  // cursor on a setting.
+  // shortcut: the cursor keeps its index, not its setting; safe while only the
+  // last row can hide, re-find the cursor's key once an earlier row can.
+  onSettingsEntriesChanged: {
+    if (settingsIndex >= settingsEntries.length) settingsIndex = settingsEntries.length - 1
+    if (settingsEntries[settingsIndex] && settingsEntries[settingsIndex].kind === "group") moveSettingsCursor(-1)
+    // The rows are rebuilt, the clicked switch with them; keep the keyboard.
+    if (currentScreen === "settings") restoreScreenFocus()
+  }
 
   // Vault data
   property var items: []

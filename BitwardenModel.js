@@ -6476,6 +6476,8 @@ var SETTINGS_SCHEMA = [
     description: "Replace the time window with a grant that ends on screen lock, vault lock, logout or revoke. Screen lock always revokes grants. Suspend revokes them through vault lock only if locking on suspend is enabled." },
   { key: "sshAgentApprovalWindowSec", group: "sshAgent", type: "int", label: "Approve for this long", unit: "seconds",
     min: 0, max: SSH_AGENT_APPROVAL_WINDOW_MAX_SEC, step: 30, zeroLabel: "Always ask", defaultValue: 120,
+    // Unused with the agent off, and the until-lock grant replaces it.
+    shownWhen: function(value) { return value("sshAgentEnabled") && !value("sshAgentApprovalUntilScreenLock") },
     description: "How long one approval covers further signatures from the same process. Grants live only in the helper's memory and never survive a restart." },
 
   { key: "closeOnCopy", group: "general", type: "bool", label: "Close panel on copy", defaultValue: true,
@@ -6509,12 +6511,15 @@ function groupedSettings() {
 }
 
 // The rows the settings screen draws: a heading row per group, then its
-// settings. SSH agent rows only when the CLI supports SSH keys. Headings are
-// rows of their own because the panel reads section positions off this list.
-function visibleSettings(deps, checked) {
+// settings. SSH agent rows only when the CLI supports SSH keys, and a setting
+// with `shownWhen` only while the other settings make it do something
+// (`value(key)` reads one). Headings are rows of their own because the panel
+// reads section positions off this list.
+function visibleSettings(deps, checked, value) {
   var showSsh = sshUiAvailable(deps, checked)
   var rows = groupedSettings().filter(function(entry) {
-    return showSsh || entry.group !== "sshAgent"
+    if (!showSsh && entry.group === "sshAgent") return false
+    return !entry.shownWhen || typeof value !== "function" || entry.shownWhen(value)
   })
 
   var out = []
