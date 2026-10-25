@@ -6442,9 +6442,9 @@ var SETTINGS_GROUPS = [
 ]
 
 var SETTINGS_SCHEMA = [
-  { key: "autoLockMinutes", group: "security", type: "int", label: "Auto-lock after", unit: "minutes",
+  { key: "autoLockMinutes", group: "security", type: "int", label: "Lock the vault after", unit: "minutes",
     min: 0, max: 1440, step: 5, zeroLabel: "Never", defaultValue: 15,
-    description: "Lock the vault after this long without activity." },
+    description: "Counts from when you last unlocked the vault or copied or saved something from it. SSH signing does not count. Locking ends every SSH approval." },
   { key: "clearClipboardSec", group: "security", type: "int", label: "Clear clipboard after", unit: "seconds",
     min: 0, max: 300, step: 5, zeroLabel: "Never", defaultValue: 30,
     description: "Wipe a copied password or code from the clipboard." },
@@ -6473,7 +6473,7 @@ var SETTINGS_SCHEMA = [
   { key: "sshAgentApprovalPopup", group: "sshAgent", type: "bool", label: "Use centered approval popup", defaultValue: true,
     description: "Show SSH unlock and signing requests in a transient card in the middle of the screen instead of opening the anchored panel. Disable to show them in the panel." },
   { key: "sshAgentApprovalUntilScreenLock", group: "sshAgent", type: "bool", label: "Approve until the screen locks", defaultValue: false,
-    description: "Replace the time window with a grant that ends on screen lock, vault lock, logout or revoke. Screen lock always revokes grants. Suspend revokes them through vault lock only if locking on suspend is enabled." },
+    description: "An approval lasts until the screen locks, not for a set time, even if the vault stays unlocked. It ends sooner if the vault locks (auto-lock included), you log out or you revoke it. Suspend also ends it if \"Lock when the machine suspends\" is on." },
   { key: "sshAgentApprovalWindowSec", group: "sshAgent", type: "int", label: "Approve for this long", unit: "seconds",
     min: 0, max: SSH_AGENT_APPROVAL_WINDOW_MAX_SEC, step: 30, zeroLabel: "Always ask", defaultValue: 120,
     // Unused with the agent off, and the until-lock grant replaces it.
