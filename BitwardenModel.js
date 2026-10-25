@@ -1233,6 +1233,7 @@ var SANITIZED_ITEMS_FILTER = JQ_ITEM_HELPERS.concat([
   "      name: (.name | string_or_empty),",
   "      type: 5,",
   "      organizationId: (.organizationId | string_or_null),",
+  "      collectionIds: (if (.collectionIds | type) == \"array\" then [.collectionIds[] | strings] else [] end),",
   "      folderId: (.folderId | string_or_null),",
   "      favorite: (.favorite | bool_or_false),",
   "      reprompt: (.reprompt | reprompt_or_zero),",
@@ -1391,6 +1392,12 @@ function listFoldersCommand() {
   return buildCappedCommand(["list", "folders"], MAX_FOLDERS_BYTES)
 }
 
+// Every collection this account can see, across its organizations, for
+// naming the ones an item is in. Read from the local sync like the folders.
+function listCollectionsCommand() {
+  return buildCappedCommand(["list", "collections"], MAX_COLLECTIONS_BYTES)
+}
+
 // Org-owned items go in collections (at least one is required), not folders.
 function listOrgCollectionsCommand(organizationId) {
   return buildCappedCommand(["list", "org-collections", "--organizationid", String(organizationId)], MAX_COLLECTIONS_BYTES)
@@ -1437,6 +1444,34 @@ function parseCollections(raw) {
   }
   out.sort(compareNames)
   return out
+}
+
+// The names of the collections an item is in, sorted; unknown ids are skipped.
+function collectionNames(collections, ids) {
+  var out = []
+  var list = toList(ids)
+  for (var i = 0; i < list.length; i++) {
+    var name = nameById(collections, String(list[i]))
+    if (name) out.push(name)
+  }
+  return out.sort(function(a, b) { return a.localeCompare(b, undefined, { sensitivity: "base" }) })
+}
+
+// Where an org item lives, for its list row: "Org / Collection +2". The
+// organization is left out when it is the account's only one (the row is
+// short on room), and until the organizations load. Empty for a personal item.
+function orgPlaceLabel(item, organizations, collections) {
+  if (!item || !item.organizationId) return ""
+  var org = nameById(organizations, item.organizationId)
+  var names = collectionNames(collections, item.collectionIds)
+  if (names.length === 0) return org
+  var place = names[0] + (names.length > 1 ? " +" + (names.length - 1) : "")
+  return org && organizations.length > 1 ? org + " / " + place : place
+}
+
+// toList(): a row read back from QML holds an array-like, not an Array.
+function idList(ids) {
+  return toList(ids).map(String)
 }
 
 var FOLDER_ENV = "QSBW_FOLDER"
@@ -3028,6 +3063,7 @@ function parseItems(raw) {
     out.push({
       id: String(it.id || ""),
       organizationId: it.organizationId ? String(it.organizationId) : null,
+      collectionIds: idList(it.collectionIds),
       folderId: it.folderId ? String(it.folderId) : null,
       name: String(it.name || "Untitled"),
       type: itemTypeName(it.type),
@@ -3082,11 +3118,12 @@ function parseSshKeys(keys) {
     var raw = {
       id: String(it.id), name: String(it.name || "Untitled"), type: 5,
       organizationId: it.organizationId ? String(it.organizationId) : null,
+      collectionIds: idList(it.collectionIds),
       folderId: it.folderId ? String(it.folderId) : null,
       favorite: Boolean(it.favorite), reprompt: repromptValue(it.reprompt),
       sshKey: { publicKey: publicKey, fingerprint: fingerprint }
     }
-    out.push({ id: String(it.id), organizationId: raw.organizationId, folderId: raw.folderId,
+    out.push({ id: String(it.id), organizationId: raw.organizationId, collectionIds: raw.collectionIds, folderId: raw.folderId,
       name: raw.name, type: "sshKey", typeCode: 5, favorite: raw.favorite,
       username: "", password: "", hasPassword: false, hasTotp: false, totpKey: "",
       uris: [], reprompt: raw.reprompt, attachments: [], hasAttachments: false,
@@ -3212,6 +3249,7 @@ function itemDetailFromObject(it) {
   if (Number(it.type) === 5) {
     var sshKey = it.sshKey || {}
     return { id: String(it.id || ""), organizationId: it.organizationId ? String(it.organizationId) : null,
+      collectionIds: idList(it.collectionIds),
       folderId: it.folderId ? String(it.folderId) : null, name: String(it.name || "Untitled"),
       type: "sshKey", typeCode: 5, favorite: Boolean(it.favorite), notes: "",
       username: "", password: "", hasPassword: false, hasTotp: false, totpKey: "", uris: [],
@@ -3228,6 +3266,7 @@ function itemDetailFromObject(it) {
   return {
     id: String(it.id || ""),
     organizationId: it.organizationId ? String(it.organizationId) : null,
+    collectionIds: idList(it.collectionIds),
     folderId: it.folderId ? String(it.folderId) : null,
     name: String(it.name || "Untitled"),
     type: itemTypeName(it.type),
@@ -3293,6 +3332,7 @@ function publicItemDetail(src) {
   return {
     id: String(src.id || ""),
     organizationId: src.organizationId ? String(src.organizationId) : null,
+    collectionIds: idList(src.collectionIds),
     folderId: src.folderId ? String(src.folderId) : null,
     name: String(src.name || "Untitled"),
     type: src.type,

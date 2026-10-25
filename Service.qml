@@ -250,13 +250,17 @@ Item {
   property double itemsLoadedAt: 0
   property double orgsLoadedAt: 0
   property double foldersLoadedAt: 0
+  property double collectionsLoadedAt: 0
   readonly property int itemsFreshMs: 60000
-  // Organizations and folders outlive an item refresh many times over.
+  // Organizations, folders and collections outlive an item refresh many times over.
   readonly property int metaFreshMs: 600000
   property var filteredItems: []
   property var organizations: []
   property string selectedOrg: "all" // "all" | "personal" | orgId
   property var folders: []
+  // Every collection the account sees, to name an item's (not the form's
+  // per-organization list, formCollections).
+  property var collections: []
   property string selectedFolder: "all" // "all" | "none" | folderId
   // The open filter group: "" | "folders" | "organizations" | "types".
   property string openFilterGroup: ""
@@ -6299,10 +6303,12 @@ Item {
     itemsLoadedAt = 0
     orgsLoadedAt = 0
     foldersLoadedAt = 0
+    collectionsLoadedAt = 0
     items = []
     filteredItems = []
     organizations = []
     folders = []
+    collections = []
     selectedOrg = "all"
     selectedFolder = "all"
     openFilterGroup = ""
@@ -6381,7 +6387,7 @@ Item {
   function secretProcesses() {
     return [
       statusProc, sessionHandoffProc, keyringLookupProc, pinUnlockProc, keyringLookupMasterProc,
-      loginProc, unlockProc, listProc, listOrgsProc, listFoldersProc, orgCollectionsProc,
+      loginProc, unlockProc, listProc, listOrgsProc, listFoldersProc, listCollectionsProc, orgCollectionsProc,
       getItemProc, getTotpProc, generateProc, listSendsProc, createSendProc,
       copyPasswordProc,
       createItemProc, editItemProc, deleteItemProc, createFolderProc, attachmentProc,
@@ -6454,7 +6460,7 @@ Item {
     return epochOperationIsStale(name) || !session
   }
 
-  // Items, organizations and folders together: each is its own bw start, and
+  // Items, organizations, folders and collections together: each is its own bw start, and
   // bw spends most of one waiting, so queueing them only added ~3 s. On a
   // session `bw status` has not confirmed yet, the metadata waits for it.
   function beginInitialVaultLoad(showSpinner, forceMetadata) {
@@ -6471,6 +6477,7 @@ Item {
     metadataForceRefresh = false
     loadOrganizations(force)
     loadFolders(force)
+    loadCollections(force)
   }
 
   // Stale-while-revalidate: show what is in memory at once and refresh behind
@@ -6628,6 +6635,20 @@ Item {
     if (vaultReadIsStale("folders")) return
     folders = Model.parseFolders(rawJson)
     foldersLoadedAt = Date.now()
+  }
+
+  function loadCollections(force) {
+    if (!session) return
+    if (!force && collections.length > 0 && (Date.now() - collectionsLoadedAt) < metaFreshMs) return
+    beginVaultRead("allCollections")
+    listCollectionsProc.command = Model.listCollectionsCommand()
+    listCollectionsProc.running = true
+  }
+
+  function onListCollectionsFinished(rawJson) {
+    if (vaultReadIsStale("allCollections")) return
+    collections = Model.parseCollections(rawJson)
+    collectionsLoadedAt = Date.now()
   }
 
   function selectFolder(folderId) {
@@ -8664,6 +8685,20 @@ Item {
     onExited: function(exitCode) {
       if (root.finishScrubRun(listFoldersProc)) return
       if (exitCode === 0) root.onListFoldersFinished(listFoldersStdout.text)
+    }
+  }
+
+  VaultProcess {
+    id: listCollectionsProc
+    vault: root
+    environment: root.bwEnv()
+    stdout: VaultCollector {
+      id: listCollectionsStdout
+      waitForEnd: true
+    }
+    onExited: function(exitCode) {
+      if (root.finishScrubRun(listCollectionsProc)) return
+      if (exitCode === 0) root.onListCollectionsFinished(listCollectionsStdout.text)
     }
   }
 
