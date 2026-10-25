@@ -586,11 +586,15 @@ Item {
     owner: root
     bar: root.bar
     open: root.opened
-    // The key catcher drives every unlocked screen but the two text-entry
-    // ones, and setup (all buttons) outright. The SSH guard first, until an
-    // SSH request shown here is armed.
+    // The key catcher drives every unlocked screen but the list (typing
+    // searches; Down hands the keys to the catcher) and the text-entry ones,
+    // and setup (all buttons) outright. The SSH guard first, until an SSH
+    // request shown here is armed. KeyboardPanel refocuses this after open,
+    // so it must agree with focusAppropriateField().
     focusTarget: !root.sshKeysArmed ? sshKeyGuard : (root.vault.currentScreen === "setup" || root.vault.currentScreen === "accounts")
       ? keyCatcher
+      : (root.vault.status === "unlocked" && root.vault.currentScreen === "main")
+      ? searchField
       : ((root.vault.status === "unlocked"
           && root.vault.currentScreen !== "edit"
           && root.vault.currentScreen !== "pin"
