@@ -235,6 +235,15 @@ Item {
     if (item) root.protect(item, function() { root.vault.startEditItem(item) })
   }
 
+  // The row's pencil edits, like the detail screen's Edit; a row click or `e`
+  // opens the item. Through the detail screen, which the form returns to.
+  // shortcut: an item that must come from `bw get item` loads async and stays
+  // on the detail screen; edit straight away once that path can call back.
+  function editListItem(item) {
+    root.vault.openDetail(item)
+    root.editDetailItem()
+  }
+
   // Whether an item carries the flag, for the lock glyph and masking.
   function asksMasterPassword(item) {
     return !!item && Number(item.reprompt) === 1
@@ -3695,9 +3704,9 @@ Item {
                       size: Style.space(28)
                       fontSize: Style.font.body
                       iconText: "󰏫"
-                      tooltipText: itemData.typeCode === 5 ? Tr.text("View public key") : Tr.text("View / Edit item (e)")
+                      tooltipText: itemData.typeCode === 5 ? Tr.text("View public key") : Tr.text("Edit item")
                       fontFamily: root.fontFamily
-                      onClicked: root.vault.openDetail(itemData)
+                      onClicked: itemData.typeCode === 5 ? root.vault.openDetail(itemData) : root.editListItem(itemData)
                     }
 
                     PanelActionButton {
