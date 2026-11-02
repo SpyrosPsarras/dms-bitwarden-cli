@@ -34,6 +34,7 @@ pathlib.Path(${JSON.stringify(dir)},kind+'.json').write_text(json.dumps(record))
         for (const binary of ['bw', 'wl-copy']) fs.writeFileSync(path.join(dir, binary), stub, {mode: 0o700});
         const {functionBody} = require('./harness');
         const copy = functionBody(panel, 'copyToClipboard');
+        const missing = functionBody(panel, 'clipboardMissing');
         const detach = functionBody(panel, 'detachWithEnvironment');
         const revoke = functionBody(panel, 'lockSessionOnUnload');
         const qml = `import QtQuick
@@ -47,11 +48,14 @@ ShellRoot {
  function bwEnv() { return {BW_SESSION: session}; }
  function resetAutoLockTimer() {}
  function flashNotification(label) {}
+ property var dependencies: ({ items: [], hasClipboard: true })
+ property bool depsChecked: true
  property bool rememberSession: false
  property bool vaultHelperActive: false
  Component { id: detachedProcessFactory; Process {} }
  ${detach}
  ${revoke}
+ ${missing}
  ${copy}
  Component.onCompleted: {
   copyToClipboard(${JSON.stringify(secret)}, "fixture");

@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.11.6-dms.6] - 2026-11-02
+
+### Fixed
+
+- Report a missing `wl-copy`/`wl-paste` (`wl-clipboard`) instead of flashing a
+  success for a copy that never landed. The dependency probe reports the tools
+  as a capability and a setup dependency, so DMS installations can install
+  the package and retry after the dependency probe refreshes.
+- Repair the real Quickshell handoff test and cover blocked-copy side effects.
+
 ## [1.11.6-dms.5] - 2026-10-29
 
 - Merge PR #11: focus search on opening the list, edit directly from row pencils, center the plain caret and restore number-button click targets.

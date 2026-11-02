@@ -44,7 +44,8 @@ for sub in ('Widgets',common_name+'/Widgets'):
 common=tmp/common_name/'Common';common.mkdir(parents=True)
 animation_names = ('DAnim','DColorAnim') if common_name == 'DCommon' else ('DankAnim','DankColorAnim')
 singleton_names = ['Style','Appearance','Fonts','Anims','I18n']
-extra_names = ['SpringMotion','ElevationShadow','FontSource'] if common_name == 'DCommon' else []
+extra_names = [n for n in ('SpringMotion','ElevationShadow','FontSource')
+               if (dms/common_name/'Common'/f'{n}.qml').is_file()] if common_name == 'DCommon' else []
 for name in ['Style','Appearance','Fonts','Anims',*animation_names,*extra_names]:
  shutil.copy(dms/common_name/'Common'/f'{name}.qml',common/f'{name}.qml')
 for source in (dms/common_name/'Common').glob('*.js'):

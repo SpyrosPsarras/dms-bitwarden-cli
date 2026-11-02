@@ -120,8 +120,8 @@ check("install: asks for the tools it can install, and only those",
   fresh.join(" ") === "bitwarden-cli jq rust",
   `got [${fresh}]`)
 
-check("install: never asks for a package Omarchy already ships",
-  Model.DEPENDENCIES.every(d => OMARCHY_BASE.indexOf(d.pkg) === -1),
+check("install: offers the clipboard package needed on non-Omarchy DMS",
+  Model.DEPENDENCIES.every(d => d.pkg === "wl-clipboard" || OMARCHY_BASE.indexOf(d.pkg) === -1),
   `wizard lists [${Model.DEPENDENCIES.map(d => d.pkg).filter(p => OMARCHY_BASE.indexOf(p) !== -1)}]`)
 
 check("install: the one thing an Omarchy machine can genuinely lack is still required",
@@ -167,7 +167,7 @@ check("fingerprint: the row is a setup row, not a package row",
 
 check("fingerprint: never reaches the package installer",
   Model.missingPackages(Model.parseDependencies(
-    "bw=1\nbw_version=2025.1.2\njq=1\ncargo=1\nfprintd=0\nfingerprint_ready=0\nfingerprint_hw=1\nomarchy=1")).length === 0,
+    "bw=1\nbw_version=2025.1.2\njq=1\ncargo=1\nwlcopy=1\nfprintd=0\nfingerprint_ready=0\nfingerprint_hw=1\nomarchy=1")).length === 0,
   "fprintd was handed to omarchy install app")
 
 const fp = Model.fingerprintSetupCommand()

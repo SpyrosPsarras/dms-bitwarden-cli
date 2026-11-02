@@ -1,6 +1,6 @@
 # Bitwarden Dankbar
 
-> Version 1.11.6-dms.5: security core ported from upstream 1.11.6. Build all three
+> Version 1.11.6-dms.6: security core ported from upstream 1.11.6. Build all three
 > helpers after updating with [**Build helpers**](docs/vault-helper.md#if-the-helper-is-missing-or-fails)
 > or `./scripts/build-helpers.sh`. DMS runs only local builds;
 > a missing or failed vault helper keeps the vault locked.
@@ -48,6 +48,8 @@ Translations are shipped in `translations/de.json` and loaded through DMS's plug
 - DankMaterialShell **1.6.0 or newer** and Quickshell.
 - The official Bitwarden CLI (`bw`) and `jq`.
 - `wl-copy` and `wl-paste` from `wl-clipboard` for bounded clipboard operations.
+  The panel reports a copy as failed instead of claiming success when they are
+  missing; setup offers wl-clipboard on DMS installations that lack either tool.
 - Rust/Cargo (`rust` on Arch) to build the vault, unlock-key and SSH helpers with
   `./scripts/build-helpers.sh`.
 - `pinentry-qt` (or another `pinentry`) and `argon2` for quick unlock.

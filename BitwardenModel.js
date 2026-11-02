@@ -4448,9 +4448,10 @@ function learnedMatchIds(assoc, ctx) {
 // Dependency checks (setup)
 // -------------------------------------------------------------------------
 //
-// Only tools an Omarchy install can actually lack; the rest (wl-clipboard,
-// libsecret, glib2, systemd, openssl...) ship with it. Probed in one process.
+// DMS installations may lack these tools; probe and offer them in setup.
 var DEPENDENCIES = [
+  { key: "wlcopy", label: "Wayland clipboard", binary: "wl-copy", pkg: "wl-clipboard", aur: false,
+    required: false, purpose: "Copies and safely clears clipboard values using wl-copy and wl-paste." },
   {
     key: "bw", label: "Bitwarden CLI", binary: "bw", pkg: "bitwarden-cli", aur: false,
     required: true,
@@ -4486,6 +4487,7 @@ function dependencyCheckCommand(pamDirectory) {
   var parts = []
   for (var i = 0; i < DEPENDENCIES.length; i++) {
     var d = DEPENDENCIES[i]
+    if (d.key === "wlcopy") continue // Both clipboard tools are checked together below.
     parts.push("if command -v " + d.binary + " >/dev/null 2>&1; then echo "
       + shellQuote(d.key + "=1") + "; else echo " + shellQuote(d.key + "=0") + "; fi")
   }
@@ -4500,6 +4502,9 @@ function dependencyCheckCommand(pamDirectory) {
   // machines without a reader are not offered fingerprint unlock.
   parts.push("if command -v fprintd-list >/dev/null 2>&1 && fprintd-list \"$USER\" 2>/dev/null | grep -qi finger; "
     + "then echo fingerprint_hw=1; else echo fingerprint_hw=0; fi")
+  // Both tools are necessary for copying and conditional clearing.
+  parts.push("if command -v wl-copy >/dev/null 2>&1 && command -v wl-paste >/dev/null 2>&1; "
+    + "then echo wlcopy=1; else echo wlcopy=0; fi")
   parts.push("if command -v dms >/dev/null 2>&1; then echo omarchy=1; else echo omarchy=0; fi")
   return ["bash", "-c", cappedScript("{ " + parts.join("; ") + "; } | head -c 4096")]
 }
@@ -4583,6 +4588,8 @@ function parseDependencies(raw, probedVersion) {
     items: out,
     hasOmarchy: found["omarchy"] === "1",
     hasFingerprintReader: found["fingerprint_hw"] === "1",
+    // `wl-copy` and `wl-paste`, from dependencyCheckCommand().
+    hasClipboard: found["wlcopy"] === "1",
     bwVersion: bwVersion,
     bwId: dependencyBwId(raw),
     sshCliMinVersion: SSH_CLI_MIN_VERSION,
@@ -4653,6 +4660,11 @@ function vaultListBlockedMessage(deps) {
     return "jq is required to safely read vault items. Finish setup to continue."
   }
   return "Could not determine how to safely read vault items."
+}
+
+// Do not block until the dependency probe has reported a missing capability.
+function clipboardCopyBlocked(deps, checked) {
+  return Boolean(checked) && Boolean(deps) && deps.hasClipboard === false
 }
 
 // SSH UI shows only once the probe confirmed a supporting CLI; an unknown
