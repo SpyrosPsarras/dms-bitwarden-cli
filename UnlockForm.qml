@@ -93,10 +93,16 @@ Column {
     if (method === "fido") form.vault.startFidoUnlock()
     else if (method === "fingerprint") form.vault.startFingerprintUnlock()
     // A default PIN or password method: open pinentry, once per showing.
-    else if (form.pinentryOffered && !form.vault.pinentryAutoAsked && !form.vault.pinentryActive) {
-      form.vault.pinentryAutoAsked = true
-      form.submitCurrentMethod()
-    }
+    // Later, not here: opening it hides the SSH popup, whose visibility may
+    // be what is showing the form, and a binding loop would leave it up.
+    else Qt.callLater(form.autoAskPinentry)
+  }
+
+  function autoAskPinentry() {
+    if (!visible || !fieldsOffered || form.vault.status !== "locked" || form.vault.isUnlocking) return
+    if (!form.pinentryOffered || form.vault.pinentryAutoAsked || form.vault.pinentryActive) return
+    form.vault.pinentryAutoAsked = true
+    form.submitCurrentMethod()
   }
 
   onFieldsOfferedChanged: armOfferedMethod()

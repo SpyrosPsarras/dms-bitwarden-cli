@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Hide the SSH popup while pinentry asks for the password to unlock a locked
+  vault. Opening pinentry from inside the popup's own showing caused a binding
+  loop that kept the popup up over pinentry, holding the keyboard.
+
 ## [1.11.6-dms.6] - 2026-11-02
 
 ### Fixed

@@ -416,8 +416,11 @@ check("the fields stay as the fallback, with the reason when pinentry failed",
 }
 {
   const arm = (form.match(/function armOfferedMethod\(\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const ask = (form.match(/function autoAskPinentry\(\) \{[\s\S]*?\n  \}/) || [""])[0]
+  // Later, not inside the visibility change that shows the form: tests/qml-kit/tst_unlock_form_pinentry.qml.
   check("a default PIN or password method opens pinentry once when the form shows",
-    /else if \(form\.pinentryOffered && !form\.vault\.pinentryAutoAsked && !form\.vault\.pinentryActive\) \{\s*form\.vault\.pinentryAutoAsked = true\s*form\.submitCurrentMethod\(\)/.test(arm), arm)
+    /startFingerprintUnlock\(\)\s*(?:\/\/.*\s*)*else Qt\.callLater\(form\.autoAskPinentry\)/.test(arm)
+      && /if \(!visible \|\| !fieldsOffered \|\| form\.vault\.status !== "locked" \|\| form\.vault\.isUnlocking\) return\s*if \(!form\.pinentryOffered \|\| form\.vault\.pinentryAutoAsked \|\| form\.vault\.pinentryActive\) return\s*form\.vault\.pinentryAutoAsked = true\s*form\.submitCurrentMethod\(\)/.test(ask), arm + ask)
   const use = (form.match(/function useMethod\(name\) \{[\s\S]*?\n  \}/) || [""])[0]
   check("picking it counts as the ask, so it is not opened twice",
     /if \(form\.pinentryOffered\) \{\s*form\.vault\.pinentryAutoAsked = true\s*form\.submitCurrentMethod\(\)/.test(use), use)

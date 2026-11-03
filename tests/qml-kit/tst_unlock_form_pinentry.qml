@@ -4,7 +4,9 @@
 // - the panel hiding while pinentry asks is not the form closing, so the
 //   method picked (Password, PIN) is still the one shown when it comes back;
 // - after a failed pinentry, the notice and "Type it here instead" show;
-// - a real close still forgets the method picked.
+// - a real close still forgets the method picked;
+// - a host that hides itself for pinentry, as the SSH popup does, hides when
+//   the form inside it opens pinentry on showing.
 //
 //   tests/qml-kit/run.sh tests/qml-kit/tst_unlock_form_pinentry.qml
 //
@@ -59,13 +61,18 @@ TestCase {
     property bool pinentryActive: false
     property bool pinentryAutoAsked: false
     property string pinentryNotice: ""
+    // As Service.qml's beginPinentry(): set before pinentry is started.
+    property bool pinentrySetsActive: false
     function startFingerprintUnlock() { tc.calls.push("fingerprint") }
     function cancelFingerprintUnlock() {}
     function startFidoUnlock() {}
     function releaseFidoUnlock() {}
     function prepareUnlock() {}
     function unlockWithPinentry() { tc.calls.push("pinentry:password") }
-    function unlockPinWithPinentry() { tc.calls.push("pinentry:pin") }
+    function unlockPinWithPinentry() {
+      tc.calls.push("pinentry:pin")
+      if (pinentrySetsActive) pinentryActive = true
+    }
     function submitPinUnlock() { tc.calls.push("submitPin") }
     function unlockVault() { tc.calls.push("unlockVault") }
     function declinePinentry() { tc.calls.push("decline"); pinentryAvailable = false; typedSecretEntry = "field" }
@@ -78,6 +85,21 @@ TestCase {
 
     UnlockForm {
       id: form
+      panel: fakePanel
+      vault: fakeVault
+    }
+  }
+
+  // Shown like SshApprovalPopup.qml: its visibility binding includes
+  // !pinentryActive, and the form inside opens pinentry when it shows.
+  Item {
+    id: popupHost
+    property bool requested: false
+    visible: requested && !fakeVault.pinentryActive
+    width: 460
+    height: 880
+
+    UnlockForm {
       panel: fakePanel
       vault: fakeVault
     }
@@ -118,6 +140,9 @@ TestCase {
     fakeVault.pinentryActive = false
     fakeVault.pinentryAutoAsked = false
     fakeVault.pinentryNotice = ""
+    fakeVault.pinentrySetsActive = false
+    fakeVault.fingerprintReady = true
+    popupHost.requested = false
     host.visible = true
     form.chosen = ""
     wait(0)
@@ -203,6 +228,21 @@ TestCase {
     keyClick(Qt.Key_S)
     compare(fakeVault.masterPassword, "s")
     verify(textItem(form, "Waiting for the vault helper...") === null, "it says it is waiting")
+  }
+
+  // The SSH popup opening for a locked vault opened pinentry from inside its
+  // own visibility change, a binding loop that left the popup up, holding
+  // the keyboard over pinentry.
+  function test_the_popup_hides_for_the_pinentry_it_opens() {
+    host.visible = false
+    fakeVault.fingerprintReady = false
+    fakeVault.pinentrySetsActive = true
+    popupHost.requested = true
+    wait(0)
+    compare(tc.calls.filter(function(c) { return c === "pinentry:pin" }).length, 1,
+      "showing the form did not open pinentry exactly once")
+    verify(fakeVault.pinentryActive, "pinentry is not active")
+    verify(!popupHost.visible, "the popup stayed up over pinentry")
   }
 
   function test_a_real_close_forgets_the_method_picked() {
