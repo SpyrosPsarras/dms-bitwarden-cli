@@ -22,11 +22,13 @@ Column {
   // security.dialog_enable_delay.
   readonly property int armDelayMs: 800
   property bool armed: false
+  property string armedBatchToken: ""
   readonly property bool shown: active && visible
 
   // Starts the delay over and parks the keyboard on the guard.
   function rearm() {
     screen.armed = false
+    screen.armedBatchToken = ""
     if (!screen.shown) {
       armTimer.stop()
       return
@@ -49,6 +51,7 @@ Column {
 
   Connections {
     target: screen.vault
+    function onSshApprovalBatchTokenChanged() { screen.rearm() }
     function onSshPromptChanged() { screen.rearm() }
     function onStatusChanged() { screen.rearm() }
   }
@@ -57,6 +60,7 @@ Column {
     id: armTimer
     interval: screen.armDelayMs
     onTriggered: {
+      screen.armedBatchToken = screen.vault.sshApprovalBatchToken
       screen.armed = true
       // Only if nothing else took the keyboard meanwhile (the panel's own
       // key dispatch, say): then Deny, never an approve tile.
@@ -321,7 +325,7 @@ Column {
       focusable: screen.armed
       opacity: screen.armed ? 1 : 0.45
       Keys.forwardTo: [keyGuard]
-      onClicked: vault.approveAllSshRequests(0, false)
+      onClicked: vault.approveAllSshRequests(0, false, screen.armedBatchToken)
     }
 
     ChoiceTile {
@@ -338,7 +342,7 @@ Column {
       focusable: screen.armed
       opacity: screen.armed ? 1 : 0.45
       Keys.forwardTo: [keyGuard]
-      onClicked: vault.approveAllSshRequests(vault.sshPrompt.grantSeconds, vault.sshPrompt.grantUntilScreenLock === true)
+      onClicked: vault.approveAllSshRequests(vault.sshPrompt.grantSeconds, vault.sshPrompt.grantUntilScreenLock === true, screen.armedBatchToken)
     }
   }
 }

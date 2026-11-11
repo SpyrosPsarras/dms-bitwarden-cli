@@ -2541,6 +2541,9 @@ Item {
   readonly property int sshTotalPendingCount: sshPendingCount + sshUnlockPendingCount
   property var sshPromptRaw: null
   readonly property bool sshApproveAllOffered: sshPrompt !== null && Model.sshAgentApproveAllOffered(sshPromptRaw, sshPromptQueue)
+  // Bind bulk consent to the exact displayed group, including request IDs,
+  // destinations and grant policy. A same-size replacement is a new group.
+  readonly property string sshApprovalBatchToken: JSON.stringify([sshPromptRaw, sshPromptQueue, sshPrompt])
   readonly property bool sshApprovalPopupOpen: sshAgentApprovalPopup
     && (sshPrompt !== null || sshUnlockRequest !== null)
   // Completion handlers treat the SSH popup as an auth surface even with the
@@ -2710,8 +2713,8 @@ Item {
     advanceSshPrompt()
   }
 
-  function approveAllSshRequests(grantSeconds, untilScreenLock) {
-    if (!root.sshApproveAllOffered) return
+  function approveAllSshRequests(grantSeconds, untilScreenLock, batchToken) {
+    if (!root.sshApproveAllOffered || !batchToken || batchToken !== root.sshApprovalBatchToken) return
     var lockBound = untilScreenLock === true && sshPrompt.grantUntilScreenLock === true
     var requests = [sshPrompt].concat(root.sshPromptQueue)
     for (var i = 0; i < requests.length; i++) {

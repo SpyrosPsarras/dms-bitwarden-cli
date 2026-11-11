@@ -51,6 +51,7 @@ TestCase {
     property bool sshAgentLoadActive: false
     property int sshPendingCount: 1
     property bool sshApproveAllOffered: false
+    property string sshApprovalBatchToken: "initial-batch"
     property int sshPromptRemainingSec: 120
     property var sshPrompt: tc.prompt("work")
     function denySshRequest() { tc.calls.push("deny") }
@@ -128,6 +129,7 @@ TestCase {
     tc.escapes = 0
     approvalVault.sshPrompt = tc.prompt("work")
     approvalVault.status = "unlocked"
+    approvalVault.sshApprovalBatchToken = "initial-batch"
     approvalVault.sshPendingCount = 1
     approvalVault.sshApproveAllOffered = false
     unlockVault.masterPassword = ""
@@ -277,6 +279,31 @@ TestCase {
     openApproval()
     keyClick(Qt.Key_Escape)
     compare(tc.escapes, 1, "Escape must reach the deny handler even before arming")
+  }
+
+  function test_bulk_queue_change_rearms() {
+    approvalVault.sshApproveAllOffered = true
+    approvalVault.sshPendingCount = 2
+    openApproval()
+    tryVerify(function() { return tc.screen.armed }, 2000)
+    approvalVault.sshPendingCount = 3
+    approvalVault.sshApprovalBatchToken = "added-request"
+    wait(0)
+    verify(!tc.screen.armed, "new batch member must restart the confirmation delay")
+  }
+
+  function test_bulk_same_count_replacement_rearms() {
+    approvalVault.sshApproveAllOffered = true
+    approvalVault.sshPendingCount = 2
+    openApproval()
+    tryVerify(function() { return tc.screen.armed }, 2000)
+    compare(tc.screen.armedBatchToken, "initial-batch")
+    approvalVault.sshApprovalBatchToken = "replacement-request"
+    wait(0)
+    verify(!tc.screen.armed)
+    compare(tc.screen.armedBatchToken, "")
+    tryVerify(function() { return tc.screen.armed }, 2000)
+    compare(tc.screen.armedBatchToken, "replacement-request")
   }
 
   function test_8_a_new_request_rearms() {

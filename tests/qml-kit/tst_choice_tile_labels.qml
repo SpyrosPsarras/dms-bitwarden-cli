@@ -30,6 +30,7 @@ TestCase {
     property bool sshAgentLoadActive: false
     property int sshPendingCount: 1
     property bool sshApproveAllOffered: false
+    property string sshApprovalBatchToken: "initial-batch"
     property int sshPromptRemainingSec: 120
     property var sshPrompt: null
     property string userEmail: ""

@@ -5,7 +5,7 @@
 //
 //   node tests/ssh-agent-ui.test.js
 
-const { createSuite, loadModule, read, readPluginSource, repoRoot } = require("./harness")
+const { createSuite, loadModule, read, readPluginSource, repoRoot, functionBody } = require("./harness")
 const fs = require("fs")
 const path = require("path")
 
@@ -846,14 +846,32 @@ check("approve all answers the active and queued requests, then closes",
     && /function showSshApproval\(message\) \{\s*root\.sshPromptRaw = message/.test(panelSrc)
     && /function dismissSshApproval\(\)[\s\S]{0,200}?root\.sshPromptRaw = null/.test(panelSrc)
     && /root\.sshPrompt\.requestId = message\.requestId\s*root\.sshPromptRaw = message/.test(panelSrc)
-    && /function approveAllSshRequests\(grantSeconds, untilScreenLock\) \{\s*if \(!root\.sshApproveAllOffered\) return[\s\S]{0,500}?sshPromptQueue[\s\S]{0,400}?sshAgentApproveLine[\s\S]{0,400}?dismissSshApproval\(\)/.test(panelSrc),
+    && /function approveAllSshRequests\(grantSeconds, untilScreenLock, batchToken\) \{\s*if \(!root\.sshApproveAllOffered \|\| !batchToken \|\| batchToken !== root\.sshApprovalBatchToken\) return[\s\S]{0,500}?sshPromptQueue[\s\S]{0,400}?sshAgentApproveLine[\s\S]{0,400}?dismissSshApproval\(\)/.test(panelSrc),
   "approveAllSshRequests is missing or not gated")
 check("approval screen offers Approve all once and with the grant, only when armed and offered",
-  /visible: decisionRow\.approveAllOffered\n[\s\S]{0,400}?enabled: screen\.armed[\s\S]{0,200}?onClicked: panel\.approveAllSshRequests\(0, false\)/.test(approvalSrc)
-    && /visible: decisionRow\.approveAllOffered && decisionRow\.grantOffered[\s\S]{0,700}?enabled: screen\.armed[\s\S]{0,200}?onClicked: panel\.approveAllSshRequests\(panel\.sshPrompt\.grantSeconds, panel\.sshPrompt\.grantUntilScreenLock === true\)/.test(approvalSrc),
+  /visible: decisionRow\.approveAllOffered\n[\s\S]{0,400}?enabled: screen\.armed[\s\S]{0,200}?onClicked: panel\.approveAllSshRequests\(0, false, screen\.armedBatchToken\)/.test(approvalSrc)
+    && /visible: decisionRow\.approveAllOffered && decisionRow\.grantOffered[\s\S]{0,700}?enabled: screen\.armed[\s\S]{0,200}?onClicked: panel\.approveAllSshRequests\(panel\.sshPrompt\.grantSeconds, panel\.sshPrompt\.grantUntilScreenLock === true, screen\.armedBatchToken\)/.test(approvalSrc),
   "approval screen is missing a gated Approve all button")
 check("popup accepts Shift+Escape to deny all requests",
   /event\.modifiers\s*&\s*Qt\.ShiftModifier[\s\S]{0,120}?popup\.panel\.denyAllSshRequests\(\)/.test(popupSrc),
   "popup does not handle Shift+Escape for deny all")
+
+// Execute the service handler: stale consent must produce no helper writes or
+// dismissal, even if the current group is otherwise eligible for bulk approval.
+for (const suppliedToken of [undefined, "", "old-group", "current-group"]) {
+  const writes = []
+  let dismissed = false
+  const root = { sshApproveAllOffered: true, sshApprovalBatchToken: "current-group",
+    sshPromptQueue: [{ requestId: 2 }], sshCooldown: {} }
+  const invoke = new Function("root", "sshPrompt", "Model", "sshAgentWrite",
+    "noteSshCooldown", "dismissSshApproval", functionBody(read("Service.qml"), "approveAllSshRequests") + "; return approveAllSshRequests")(
+      root, { requestId: 1, grantUntilScreenLock: true }, Model,
+      line => writes.push(JSON.parse(line)), () => {}, () => { dismissed = true })
+  invoke(0, false, suppliedToken)
+  const accepted = suppliedToken === "current-group"
+  eq(`bulk ${String(suppliedToken)} writes only with current consent`, writes.length, accepted ? 2 : 0)
+  eq(`bulk ${String(suppliedToken)} dismisses only with current consent`, dismissed, accepted)
+  if (accepted) eq("bulk answers exactly the consented IDs", writes.map(x => x.requestId).join(","), "1,2")
+}
 
 done()
