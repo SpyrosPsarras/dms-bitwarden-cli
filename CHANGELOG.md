@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.11.6-dms.7] - 2026-11-11
 
 ### Added
 
@@ -15,6 +15,16 @@
 - The SSH approval prompt always uses two columns. With a single request,
   Deny sits alone on the first row and both approve tiles share the second,
   so "Approve until screen lock" no longer wraps.
+
+### Fixed
+
+- Bind bulk SSH approval to the exact displayed request group and restart the
+  confirmation delay when it changes, including same-size replacements. Stale
+  consent cannot approve newly queued requests.
+
+- Hide the SSH popup while pinentry asks for the password to unlock a locked
+  vault. Opening pinentry from inside the popup's own showing caused a binding
+  loop that kept the popup up over pinentry, holding the keyboard.
 
 ## [1.11.6-dms.6] - 2026-11-02
 
