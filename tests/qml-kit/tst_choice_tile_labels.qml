@@ -29,6 +29,7 @@ TestCase {
     property bool sshAgentApprovalPopup: true
     property bool sshAgentLoadActive: false
     property int sshPendingCount: 1
+    property bool sshApproveAllOffered: false
     property int sshPromptRemainingSec: 120
     property var sshPrompt: null
     property string userEmail: ""
@@ -110,10 +111,13 @@ TestCase {
       "Approve until screen lock": "Bis zur Bildschirmsperre erlauben",
       "Approve once": "Einmal erlauben",
       "Deny all (4)": "Alle ablehnen (4)",
+      "Approve all once (4)": "Alle einmal erlauben (4)",
+      "Approve all until lock (4)": "Alle bis Sperre erlauben (4)",
       "Password": "Passwort"
     }
     if (language === "de") choices.forEach(function(tile) {
       if (german[tile.label]) tile.label = german[tile.label]
+      else if (/^Approve all for /.test(tile.label)) tile.label = tile.label.replace("Approve all for", "Alle für")
     })
   }
 
@@ -147,7 +151,7 @@ TestCase {
   function approvalData() {
     var rows = []
     ;["en", "de"].forEach(function(language) {
-      ;[3, 4].forEach(function(count) {
+      ;[3, 4, 6].forEach(function(count) {
         ;["lock", "timed"].forEach(function(mode) {
           rows.push({tag: language + "-" + count + "-" + mode, language: language, count: count, mode: mode})
         })
@@ -157,7 +161,8 @@ TestCase {
   }
 
   function openApproval(data) {
-    fakeVault.sshPendingCount = data.count === 4 ? 4 : 1
+    fakeVault.sshPendingCount = data.count >= 4 ? 4 : 1
+    fakeVault.sshApproveAllOffered = data.count === 6
     fakeVault.sshPrompt = Model.sshAgentPromptView({grantOffered: true}, longestTimedSeconds, data.mode === "lock")
     // SshApprovalPopup's 460 px card, 12 px padding and 2 px border per side.
     var rowWidth = Style.space(460) - 2 * (Style.spacing.panelPadding + Math.max(1, Style.space(2)))
@@ -174,19 +179,26 @@ TestCase {
   function test_approvalCaptions_data() { return approvalData() }
   function test_approvalCaptions(data) {
     var choices = openApproval(data)
-    if (data.mode === "timed") compare(choices[choices.length - 1].label, longestTimedLabel)
+    if (data.mode === "timed") compare(choices[data.count === 6 ? 3 : choices.length - 1].label, longestTimedLabel)
     checkCaptions(choices)
+    // English captions fit on one line; so do the Approve all ones in German.
+    choices.slice(data.language === "en" ? 0 : 4).forEach(function(tile) {
+      var caption = descendants(tile, function(item) { return item.text === tile.label && item.font !== undefined })[0]
+      compare(caption.lineCount, 1, tile.label + " wraps")
+    })
   }
 
   function test_approvalLayout_data() { return approvalData() }
   function test_approvalLayout(data) {
     var choices = openApproval(data)
-    var columns = data.count === 4 ? 2 : data.count
+    var columns = 2
     var tileWidth = (screen.width - Style.space(6) * (columns - 1)) / columns
+    // A lone Deny keeps the approve tiles together on the second row.
+    var cells = data.count === 3 ? [0, 2, 3] : choices.map(function(tile, index) { return index })
     choices.forEach(function(tile, index) {
       fuzzyCompare(tile.width, tileWidth, 0.01, "equal-width tiles")
-      fuzzyCompare(tile.x, (index % columns) * (tileWidth + Style.space(6)), 0.01)
-      fuzzyCompare(tile.y, Math.floor(index / columns) * (choices[0].height + Style.space(6)), 0.01)
+      fuzzyCompare(tile.x, (cells[index] % columns) * (tileWidth + Style.space(6)), 0.01)
+      fuzzyCompare(tile.y, Math.floor(cells[index] / columns) * (choices[0].height + Style.space(6)), 0.01)
     })
   }
 

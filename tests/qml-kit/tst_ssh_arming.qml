@@ -38,7 +38,8 @@ TestCase {
       forwardedWarning: "", operationLabel: "Git commit or tag signature", destinationLabel: "",
       keyName: keyName, fingerprint: "SHA256:x", processName: "ssh-keygen",
       processPath: "/usr/bin/ssh-keygen", provenanceNote: "", grantOffered: true,
-      grantShortLabel: "Approve 2m", grantLabel: "Approve for this program", grantSeconds: 120
+      grantShortLabel: "Approve 2m", grantLabel: "Approve for this program", grantSeconds: 120,
+      grantDuration: "2m"
     }
   }
 
@@ -49,11 +50,13 @@ TestCase {
     property bool sshAgentApprovalPopup: true
     property bool sshAgentLoadActive: false
     property int sshPendingCount: 1
+    property bool sshApproveAllOffered: false
     property int sshPromptRemainingSec: 120
     property var sshPrompt: tc.prompt("work")
     function denySshRequest() { tc.calls.push("deny") }
     function denyAllSshRequests() { tc.calls.push("denyAll") }
     function approveSshRequest(sec) { tc.calls.push("approve(" + sec + ")") }
+    function approveAllSshRequests(sec, untilLock) { tc.calls.push("approveAll(" + sec + "," + untilLock + ")") }
   }
 
   // Stands in for the card or panel above the screen, which denies on Escape.
@@ -125,6 +128,8 @@ TestCase {
     tc.escapes = 0
     approvalVault.sshPrompt = tc.prompt("work")
     approvalVault.status = "unlocked"
+    approvalVault.sshPendingCount = 1
+    approvalVault.sshApproveAllOffered = false
     unlockVault.masterPassword = ""
   }
 
@@ -207,6 +212,57 @@ TestCase {
     compare(tc.calls.join(","), "", "a click reached an approve tile before arming")
     tryVerify(function() { return tc.screen.armed }, 2000, "the card never armed")
     verify(once.enabled && grant.enabled, "approve tiles stay disabled after arming")
+  }
+
+  function test_5b_approve_all_is_inert_until_armed() {
+    approvalVault.sshPendingCount = 4
+    approvalVault.sshApproveAllOffered = true
+    openApproval()
+    var once = tile("Approve all once (4)")
+    var timed = tile("Approve all for 2m (4)")
+    verify(once !== null && once.visible && timed !== null && timed.visible, "Approve all tiles not shown")
+    verify(!once.enabled && !timed.enabled, "Approve all tiles must be disabled while unarmed")
+    mouseClick(once)
+    mouseClick(timed)
+    compare(tc.calls.join(","), "", "a click reached Approve all before arming")
+    tryVerify(function() { return tc.screen.armed }, 2000, "the card never armed")
+    mouseClick(once)
+    mouseClick(timed)
+    compare(tc.calls.join(","), "approveAll(0,false),approveAll(120,false)")
+  }
+
+  function test_5c_approve_all_hidden_when_not_offered() {
+    approvalVault.sshPendingCount = 4
+    openApproval()
+    var once = tile("Approve all once (4)")
+    verify(once === null || !once.visible, "Approve all shown for requests that differ")
+    verify(tile("Deny all (4)").visible, "Deny all must still be offered")
+  }
+
+  function test_5e_approve_all_once_gets_its_own_row_without_a_grant() {
+    approvalVault.sshPendingCount = 4
+    approvalVault.sshApproveAllOffered = true
+    approvalVault.sshPrompt = Object.assign(tc.prompt("work"), { grantOffered: false })
+    openApproval()
+    var once = tile("Approve once")
+    var all = tile("Approve all once (4)")
+    verify(once !== null && all !== null && all.visible, "tiles not found")
+    verify(all.y > once.y, "Approve all once must sit below the row that answers one request")
+    verify(tile("Approve all for 2m (4)") === null || !tile("Approve all for 2m (4)").visible,
+      "no grant tile without a grant offer")
+  }
+
+  function test_5d_approve_all_until_lock() {
+    approvalVault.sshPendingCount = 4
+    approvalVault.sshApproveAllOffered = true
+    approvalVault.sshPrompt = Object.assign(tc.prompt("work"),
+      { grantUntilScreenLock: true, grantSeconds: 0, grantDuration: "" })
+    openApproval()
+    var lock = tile("Approve all until lock (4)")
+    verify(lock !== null && lock.visible, "Approve all until lock not shown")
+    tryVerify(function() { return tc.screen.armed }, 2000, "the card never armed")
+    mouseClick(lock)
+    compare(tc.calls.join(","), "approveAll(0,true)")
   }
 
   function test_6_keyboard_approval_still_works_once_armed() {

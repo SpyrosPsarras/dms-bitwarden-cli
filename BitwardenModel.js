@@ -5892,6 +5892,7 @@ function sshAgentPromptView(message, approvalWindowSec, untilScreenLock) {
     grantOffered: grantOffered,
     grantSeconds: grantOffered && untilScreenLock !== true ? window : 0,
     grantUntilScreenLock: grantOffered && untilScreenLock === true,
+    grantDuration: grantOffered && untilScreenLock !== true ? formatDuration(window) : "",
     // A grant covers the program (path + key + kind of signature, and for a
     // login the server), so each new ssh-keygen that Git spawns rides it.
     grantLabel: grantOffered ? "Approve for this program · " + (untilScreenLock === true ? "until screen lock" : formatDuration(window)) : "",
@@ -5948,6 +5949,17 @@ function sshAgentPendingCount(activePrompt, queue) {
   var active = activePrompt ? 1 : 0
   var queued = Array.isArray(queue) ? queue.length : 0
   return active + queued
+}
+
+// Raw messages, not prompt views, so text the prompt cuts or hides still counts.
+function sshAgentApproveAllOffered(active, queue) {
+  if (!active || !Array.isArray(queue) || queue.length === 0) return false
+  if (active.operation !== "ssh-auth" && active.operation !== "sshsig") return false
+  var fields = ["keyId", "fingerprint", "processPath", "operation", "operationDetail",
+    "forwarded", "grantOffered"]
+  return queue.every(function(message) {
+    return !!message && fields.every(function(field) { return message[field] === active[field] })
+  })
 }
 
 // Grant views for the settings screen (public metadata only).

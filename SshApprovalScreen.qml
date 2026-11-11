@@ -230,16 +230,16 @@ Column {
   }
 
   // Deny first, and no bare-Enter default: a stray key must not sign.
-  // Four choices need two rows to keep long captions readable.
+  // Two columns keep long captions on one line.
   Grid {
     id: decisionRow
     width: parent.width
     spacing: Style.space(6)
-    columns: count === 4 ? 2 : count
+    columns: 2
 
     readonly property bool denyAllOffered: vault.sshPendingCount > 1
     readonly property bool grantOffered: vault.sshPrompt !== null && vault.sshPrompt.grantOffered === true
-    readonly property int count: 2 + (denyAllOffered ? 1 : 0) + (grantOffered ? 1 : 0)
+    readonly property bool approveAllOffered: vault.sshApproveAllOffered
     readonly property real tileWidth: (width - spacing * (columns - 1)) / columns
 
     ChoiceTile {
@@ -264,6 +264,13 @@ Column {
       focusable: true
       Keys.forwardTo: [keyGuard]
       onClicked: vault.denyAllSshRequests()
+    }
+
+    // Keeps both approve tiles together on the second row when Deny is alone.
+    Item {
+      visible: !decisionRow.denyAllOffered && decisionRow.grantOffered
+      width: decisionRow.tileWidth
+      height: 1
     }
 
     ChoiceTile {
@@ -294,6 +301,44 @@ Column {
       opacity: screen.armed ? 1 : 0.45
       Keys.forwardTo: [keyGuard]
       onClicked: vault.approveSshRequest(vault.sshPrompt ? vault.sshPrompt.grantSeconds : 0, vault.sshPrompt ? vault.sshPrompt.grantUntilScreenLock : false)
+    }
+
+    // Keeps Approve all on its own row when there is no grant tile beside Approve once.
+    Item {
+      visible: decisionRow.approveAllOffered && !decisionRow.grantOffered
+      width: decisionRow.tileWidth
+      height: 1
+    }
+
+    ChoiceTile {
+      visible: decisionRow.approveAllOffered
+      panel: screen.panel
+      width: decisionRow.tileWidth
+      glyph: "󰄭"
+      label: Tr.text("Approve all once") + " (" + vault.sshPendingCount + ")"
+      tooltipText: "Sign this request and every one waiting behind it, once each"
+      enabled: screen.armed
+      focusable: screen.armed
+      opacity: screen.armed ? 1 : 0.45
+      Keys.forwardTo: [keyGuard]
+      onClicked: vault.approveAllSshRequests(0, false)
+    }
+
+    ChoiceTile {
+      visible: decisionRow.approveAllOffered && decisionRow.grantOffered
+      panel: screen.panel
+      width: decisionRow.tileWidth
+      glyph: "󰔟"
+      label: (vault.sshPrompt && vault.sshPrompt.grantUntilScreenLock
+        ? Tr.text("Approve all until lock")
+        : Tr.text("Approve all for") + " " + (vault.sshPrompt ? vault.sshPrompt.grantDuration : ""))
+        + " (" + vault.sshPendingCount + ")"
+      tooltipText: "Approve this request and every one waiting behind it, each for its own server, program and key"
+      enabled: screen.armed
+      focusable: screen.armed
+      opacity: screen.armed ? 1 : 0.45
+      Keys.forwardTo: [keyGuard]
+      onClicked: vault.approveAllSshRequests(vault.sshPrompt.grantSeconds, vault.sshPrompt.grantUntilScreenLock === true)
     }
   }
 }

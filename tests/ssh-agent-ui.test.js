@@ -77,6 +77,8 @@ eq("the prompt shows the pid", view.pid, 48213)
 eq("the prompt offers a grant", view.grantOffered, true)
 check("the grant button states its window", /2m|120/.test(view.grantLabel), view.grantLabel)
 check("and so does its short tile label", view.grantShortLabel === "Approve 2m", view.grantShortLabel)
+eq("a timed grant names its duration for Approve all", view.grantDuration, "2m")
+eq("an until-lock grant has no duration", Model.sshAgentPromptView(request, 120, true).grantDuration, "")
 // A grant covers one program, not one process.
 // The button has to say so, or it promises a narrower thing than it does.
 check("the grant button says what it actually covers",
@@ -766,6 +768,27 @@ eq("pending count includes active and queued", Model.sshAgentPendingCount({ requ
 eq("pending count with no active", Model.sshAgentPendingCount(null, q), 4)
 eq("pending count with no queue", Model.sshAgentPendingCount({ requestId: 0 }, []), 1)
 
+const login = host => ({ requestId: 7, keyId: "k", keyName: "node", fingerprint: "SHA256:k", pid: 9,
+  processPath: "/usr/bin/ssh", operation: "ssh-auth", operationDetail: "node", hostKey: host,
+  forwarded: false, grantOffered: true })
+const hostA = "SHA256:" + "a".repeat(43)
+const hostB = "SHA256:" + "b".repeat(43)
+const approveAll = queue => Model.sshAgentApproveAllOffered(login(hostA), queue)
+eq("approve all is offered for logins that differ only by server", approveAll([login(hostB), login(hostA)]), true)
+eq("approve all needs a queue", approveAll([]), false)
+eq("approve all needs an active prompt", Model.sshAgentApproveAllOffered(null, [login(hostB)]), false)
+eq("approve all compares text the prompt would cut",
+  approveAll([Object.assign(login(hostB), { processPath: "/usr/bin/ssh" + "x".repeat(600) })]), false)
+for (const [field, value] of [["fingerprint", "SHA256:other"], ["keyId", "other"],
+  ["processPath", "/usr/bin/git"], ["operation", "sshsig"], ["operationDetail", "root"],
+  ["forwarded", true], ["grantOffered", false]]) {
+  eq(`approve all is withheld when ${field} differs`,
+    approveAll([login(hostB), Object.assign(login(hostB), { [field]: value })]), false)
+}
+const unknown = Object.assign(login(""), { operation: "ssh-sign", operationDetail: "" })
+eq("approve all is never offered for unrecognised data",
+  Model.sshAgentApproveAllOffered(unknown, [unknown]), false)
+
 let deq = Model.sshAgentDequeuePrompt(q)
 eq("dequeues first item", deq.next.requestId, 1)
 eq("remaining queue length is decremented", deq.remaining.length, 3)
@@ -812,12 +835,23 @@ check("a prompt withdrawn because a grant answered it costs no cooldown",
 // Keep decision order when four tiles become a two-column grid.
 check("the approval decisions share a grid, Deny first",
   /Grid \{\s*id: decisionRow[\s\S]*?ChoiceTile \{\s*id: denyButton[\s\S]*?label: "Deny all[\s\S]*?label: "Approve once"[\s\S]*?grantShortLabel/.test(approvalSrc)
-    && /columns: count === 4 \? 2 : count/.test(approvalSrc)
+    && /columns: 2\n/.test(approvalSrc)
     && !/^\s*Button \{/m.test(approvalSrc), "")
 check("approval screen provides a Deny all button when multiple requests exist",
   /label:\s*"Deny all \("\s*\+\s*panel\.sshPendingCount\s*\+\s*"\)"/.test(approvalSrc)
     && /onClicked: panel\.denyAllSshRequests\(\)/.test(approvalSrc),
   "approval screen is missing Deny all button")
+check("approve all answers the active and queued requests, then closes",
+  /readonly property bool sshApproveAllOffered: sshPrompt !== null && Model\.sshAgentApproveAllOffered\(sshPromptRaw, sshPromptQueue\)/.test(panelSrc)
+    && /function showSshApproval\(message\) \{\s*root\.sshPromptRaw = message/.test(panelSrc)
+    && /function dismissSshApproval\(\)[\s\S]{0,200}?root\.sshPromptRaw = null/.test(panelSrc)
+    && /root\.sshPrompt\.requestId = message\.requestId\s*root\.sshPromptRaw = message/.test(panelSrc)
+    && /function approveAllSshRequests\(grantSeconds, untilScreenLock\) \{\s*if \(!root\.sshApproveAllOffered\) return[\s\S]{0,500}?sshPromptQueue[\s\S]{0,400}?sshAgentApproveLine[\s\S]{0,400}?dismissSshApproval\(\)/.test(panelSrc),
+  "approveAllSshRequests is missing or not gated")
+check("approval screen offers Approve all once and with the grant, only when armed and offered",
+  /visible: decisionRow\.approveAllOffered\n[\s\S]{0,400}?enabled: screen\.armed[\s\S]{0,200}?onClicked: panel\.approveAllSshRequests\(0, false\)/.test(approvalSrc)
+    && /visible: decisionRow\.approveAllOffered && decisionRow\.grantOffered[\s\S]{0,700}?enabled: screen\.armed[\s\S]{0,200}?onClicked: panel\.approveAllSshRequests\(panel\.sshPrompt\.grantSeconds, panel\.sshPrompt\.grantUntilScreenLock === true\)/.test(approvalSrc),
+  "approval screen is missing a gated Approve all button")
 check("popup accepts Shift+Escape to deny all requests",
   /event\.modifiers\s*&\s*Qt\.ShiftModifier[\s\S]{0,120}?popup\.panel\.denyAllSshRequests\(\)/.test(popupSrc),
   "popup does not handle Shift+Escape for deny all")

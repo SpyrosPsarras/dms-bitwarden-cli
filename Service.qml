@@ -2539,6 +2539,8 @@ Item {
   readonly property int sshPendingCount: Model.sshAgentPendingCount(sshPrompt, sshPromptQueue)
   readonly property int sshUnlockPendingCount: Model.sshAgentPendingCount(sshUnlockRequest, sshUnlockQueue)
   readonly property int sshTotalPendingCount: sshPendingCount + sshUnlockPendingCount
+  property var sshPromptRaw: null
+  readonly property bool sshApproveAllOffered: sshPrompt !== null && Model.sshAgentApproveAllOffered(sshPromptRaw, sshPromptQueue)
   readonly property bool sshApprovalPopupOpen: sshAgentApprovalPopup
     && (sshPrompt !== null || sshUnlockRequest !== null)
   // Completion handlers treat the SSH popup as an auth surface even with the
@@ -2602,6 +2604,7 @@ Item {
   }
 
   function showSshApproval(message) {
+    root.sshPromptRaw = message
     root.sshPrompt = Model.sshAgentPromptView(message, root.sshAgentApprovalWindowSec, root.sshAgentApprovalUntilScreenLock)
     if (startSshPromptClock()) return
     if (root.currentScreen !== "sshApproval") root.screenBeforeSshApproval = root.currentScreen
@@ -2632,6 +2635,7 @@ Item {
     var openedForThis = root.sshPromptOpenedPanel
     var popupWasUsed = root.sshApprovalPopupOpen
     root.sshPrompt = null
+    root.sshPromptRaw = null
     root.sshPromptQueue = []
     root.sshPromotedOldId = null
     root.sshPromotedRaw = null
@@ -2704,6 +2708,18 @@ Item {
     root.sshCooldown = Model.sshAgentCooldownAfter(root.sshCooldown, "approved", Date.now())
     noteSshCooldown()
     advanceSshPrompt()
+  }
+
+  function approveAllSshRequests(grantSeconds, untilScreenLock) {
+    if (!root.sshApproveAllOffered) return
+    var lockBound = untilScreenLock === true && sshPrompt.grantUntilScreenLock === true
+    var requests = [sshPrompt].concat(root.sshPromptQueue)
+    for (var i = 0; i < requests.length; i++) {
+      sshAgentWrite(Model.sshAgentApproveLine(requests[i].requestId, grantSeconds, lockBound))
+    }
+    root.sshCooldown = Model.sshAgentCooldownAfter(root.sshCooldown, "approved", Date.now())
+    noteSshCooldown()
+    dismissSshApproval()
   }
 
   function denySshRequest() {
@@ -2799,6 +2815,7 @@ Item {
     if (root.sshPromotedOldId !== null && root.sshPrompt
         && Model.sshAgentSameRequest(root.sshPromotedRaw, message)) {
       root.sshPrompt.requestId = message.requestId
+      root.sshPromptRaw = message
       root.sshPromotedOldId = null
       root.sshPromotedRaw = null
       return true

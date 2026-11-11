@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Approve all once (N)** and **Approve all until lock (N)** (or
+  **Approve all for 2m (N)**) on a third row of the SSH approval prompt, when
+  every queued request uses the same key, program and kind of signature and
+  differs at most by server, such as `ssh` to several nodes at once. A login
+  grant still covers one server, so before this each node asked separately.
+
+### Changed
+
+- The SSH approval prompt always uses two columns. With a single request,
+  Deny sits alone on the first row and both approve tiles share the second,
+  so "Approve until screen lock" no longer wraps.
+
 ## [1.11.6-dms.6] - 2026-11-02
 
 ### Fixed
