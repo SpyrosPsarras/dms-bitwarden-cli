@@ -6,7 +6,7 @@
 //
 //   node tests/service-host.test.js
 
-const { createSuite, functionBody, loadModule, read, repoRoot } = require("./harness")
+const { createSuite, loadModule, read, repoRoot } = require("./harness")
 const fs = require("fs")
 const path = require("path")
 
@@ -47,38 +47,8 @@ check("the lock's own run is waited for before the vault is retired",
 check("only a real true counts",
   S(true, { busy: "yes", held: 1, locking: "x" }) === "adopt", "expected adopt")
 
-const handOver = functionBody(panel, "handOverVault")
-check("the private host polls for the service and stops once shared",
-  /id:\s*vaultHandOverTimer[\s\S]{0,200}running:\s*root\.vaultHost === "private"/.test(panel)
-    && /interval: Model\.vaultHandOverPollMs\(\)/.test(panel)
-    && /^\s*if \(root\.vaultHost !== "private"\) return/m.test(handOver),
-  "vaultHandOverTimer must run only while private")
-check("the first lookup is untouched by it",
-  /function resolveVault\(\) \{\s*if \(root\.resolvedVault\) return/.test(panel)
-    && /interval: 50\s*repeat: true\s*running: root\.resolvedVault === null && root\.vaultHost === "pending"/.test(panel),
-  "resolveVault and vaultResolveTimer must keep their first-resolution behaviour")
-check("the poll asks the model with the private vault's state",
-  /Model\.vaultHandOverStep\(!!shared, \{\s*busy: localVault\.pinentryActive \|\| localVault\.authAttemptInFlight\(\),\s*held: localVault\.vaultStatePresent\(\) \|\| localVault\.isUnlocking,\s*locking: localVault\.lockRun !== null \|\| localVault\.lockQueue\.length > 0/.test(handOver),
-  "busy, held and locking must come from the private vault")
-check("a held private vault is locked, with its popout closed, and nothing else happens that poll",
-  /if \(localVault\.opened\) localVault\.close\(\)\s*if \(step === "lock"\) \{\s*localVault\.lockVault\(\)\s*return\s*\}/.test(handOver),
-  "lock step must close, lock and return")
-const detachAt = handOver.indexOf("localVault.detachView(root)")
-const attachAt = handOver.indexOf("shared.attachView(root)")
-check("the view leaves the private vault before it joins the shared one",
-  detachAt !== -1 && attachAt !== -1 && detachAt < attachAt, `detach at ${detachAt}, attach at ${attachAt}`)
-check("and the shared vault becomes `vault` for the view",
-  /root\.resolvedVault = shared\s*root\.vaultHost = "shared"\s*shared\.attachView\(root\)/.test(handOver.replace(/\/\/[^\n]*\n\s*/g, "")),
-  "resolvedVault and vaultHost must switch to shared before attaching")
-check("the retired private vault's helpers are stopped, after the detach",
-  handOver.indexOf("localVault.releaseVaultHelper()") > detachAt
-    && handOver.indexOf('localVault.applySshAgentEvent({ kind: "enabled", value: false') > detachAt,
-  "releaseVaultHelper and the SSH agent disable must follow detachView")
-for (const name of ["pinentryActive", "authAttemptInFlight", "vaultStatePresent", "isUnlocking", "lockRun",
-    "lockQueue", "opened", "close", "lockVault", "detachView", "releaseVaultHelper", "applySshAgentEvent"]) {
-  check(`the private vault has ${name}`,
-    new RegExp(`^  (?:readonly )?(?:property \\S+ ${name}\\b|function ${name}\\()`, "m").test(service), `${name} missing from Service.qml`)
-}
+// DMS's daemon owns the one service (above), so no view holds a private
+// vault for Panel.qml to hand over.
 
 // --- the service's view registry --------------------------------------------
 

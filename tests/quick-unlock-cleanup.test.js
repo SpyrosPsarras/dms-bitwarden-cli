@@ -22,7 +22,7 @@ function bind(v, text, names) {
 }
 function vault() {
   const v = {
-    Model, Qt: { callLater: f => f() }, console: { log() {}, warn() {} },
+    Model, Qt: { callLater: f => f() }, console: { log() {}, warn() {} }, Tr: { text: t => t },
     status: "locked", sshAuthSurfaceActive: false, pinUnlockSubmitted: true, pinBusy: true,
     fingerprintAuthorized: true, pinAttempts: 1, pendingUnlockFrom: "", pinFromEnvelope: false,
     heldPinName: "", pinEntry: "", pendingPinForMigration: "", session: "", readEpochs: {},

@@ -258,9 +258,9 @@ const panel = read("Panel.qml")
 check("the panel shows only a user's sync",
   /readonly property bool userSyncing: root\.vault\.isSyncing && !root\.vault\.backgroundSync/.test(panel)
     && /if \(root\.userSyncing\) return "Syncing\.\.\."/.test(panel)
-    && /tooltipText: root\.userSyncing \? "Syncing\.\.\." : "Sync vault \(r\)"/.test(panel)
+    && /iconSpinning: root\.userSyncing/.test(panel)
     && /enabled: !root\.userSyncing/.test(panel),
-  "header text, tooltip and enabled must go through userSyncing")
+  "header text, spinner and enabled must go through userSyncing")
 check("and reaches isSyncing nowhere else",
   (panel.match(/\bisSyncing\b/g) || []).length === 1, String((panel.match(/\bisSyncing\b/g) || []).length))
 {
