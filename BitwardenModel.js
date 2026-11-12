@@ -1405,7 +1405,7 @@ function autoTypeFailedNoticeCommand(message) {
 // [A-Za-z0-9_+ ], so it can sit inside a Lua string as is, and the line still
 // reaches the script as an argument, never spliced into it.
 
-var AUTO_TYPE_IPC_COMMAND = "omarchy-shell io.github.elevate08.qs-bitwarden-cli autoType"
+var AUTO_TYPE_IPC_COMMAND = "dms ipc call bitwarden autoType"
 var AUTO_TYPE_BIND_DESCRIPTION = "Bitwarden auto-type"
 var AUTO_TYPE_BIND_COMMENT = "-- Added by the qs-bitwarden-cli plugin (Settings > General > Auto-type logins)."
 var AUTO_TYPE_BINDINGS_REL = ".config/hypr/bindings.lua"
@@ -1519,7 +1519,7 @@ function parseHyprBinds(raw) {
 }
 
 function isAutoTypeCommand(text) {
-  return /io\.github\.elevate08\.qs-bitwarden-cli\s+autoType(?![A-Za-z0-9_])/.test(String(text || ""))
+  return /\bipc\s+call\s+bitwarden\s+autoType(?![A-Za-z0-9_])/.test(String(text || ""))
 }
 
 // A hyprctl bind that runs the autoType IPC: an `exec` of the command, or
@@ -1787,7 +1787,7 @@ function autoTypeKeybindRegisterCommand(chord) {
     + "if [ -e \"$__f\" ] || [ -L \"$__f\" ]; then "
     + "[ -f \"$__f\" ] && [ -r \"$__f\" ] && [ -w \"$__f\" ] || exit " + KEYBIND_EXIT_FILE + "; "
     + "if grep -v '^[[:space:]]*--' -- \"$__f\" | grep -Eq "
-    + shellQuote("io\\.github\\.elevate08\\.qs-bitwarden-cli[[:space:]]+autoType([^A-Za-z0-9_]|$)")
+    + shellQuote("ipc[[:space:]]+call[[:space:]]+bitwarden[[:space:]]+autoType([^A-Za-z0-9_]|$)")
     + "; then exit " + KEYBIND_EXIT_BOUND + "; fi; "
     + "else " + hyprlandLoadsBindingsShell() + " || exit " + KEYBIND_EXIT_NOT_LOADED + "; fi; "
     + "__sep=''; if [ -s \"$__f\" ]; then __sep='\\n'; "

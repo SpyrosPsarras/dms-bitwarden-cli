@@ -16,7 +16,7 @@ const { createSuite, loadModule, readPluginSource } = require("./harness")
 const Model = loadModule()
 const { check, eq, done } = createSuite("auto-type-keybind")
 
-const COMMAND = "omarchy-shell io.github.elevate08.qs-bitwarden-cli autoType"
+const COMMAND = "dms ipc call bitwarden autoType"
 const COMMENT = Model.autoTypeBindComment()
 const lineFor = chord => `o.bind("${chord}", "Bitwarden auto-type", "${COMMAND}")`
 
@@ -137,7 +137,7 @@ const userFile = [
   "-- o.bind(\"SUPER + SHIFT + R\", \"SSH\", \"alacritty -e ssh your-server\")",
   "-- o.bind(\"SUPER + CTRL + BACKSLASH\", \"x\", \"" + COMMAND + "\")",
   "hl.unbind(\"SUPER + SHIFT + SLASH\")",
-  "o.bind(\"SUPER + SHIFT + SLASH\", \"Bitwarden vault\", \"omarchy-shell io.github.elevate08.qs-bitwarden-cli toggle\")",
+  "o.bind(\"SUPER + SHIFT + SLASH\", \"Bitwarden vault\", \"dms ipc call bitwarden toggle\")",
   "o.bind(\"SUPER + SHIFT + S\", nil, \"omarchy-capture-screenshot\")",
   "do",
   "  hl.bind(\"Escape\", function() end)",
@@ -153,8 +153,8 @@ check("bindings.lua's o.bind() lines are read, commented ones skipped",
 check("a commented-out auto-type line is not a binding",
   plain.autoType === null && plain.autoTypeCount === 0, JSON.stringify(plain.autoType))
 check("the toggle command is not the auto-type command",
-  !Model.isAutoTypeCommand("omarchy-shell io.github.elevate08.qs-bitwarden-cli toggle")
-    && !Model.isAutoTypeCommand("omarchy-shell io.github.elevate08.qs-bitwarden-cli autoTypeX")
+  !Model.isAutoTypeCommand("dms ipc call bitwarden toggle")
+    && !Model.isAutoTypeCommand("dms ipc call bitwarden autoTypeX")
     && Model.isAutoTypeCommand(COMMAND), "isAutoTypeCommand")
 
 const withOurs = userFile + "\n" + COMMENT + "\n" + lineFor("SUPER + CTRL + BACKSLASH") + "\n"
@@ -248,7 +248,7 @@ check("Omarchy's SUPER + SHIFT + A is taken, named by its description",
   JSON.stringify(taken))
 const toggle = Model.autoTypeChordCheck("super + shift + slash", none)
 check("a binding from bindings.lua is named with its command",
-  !toggle.ok && toggle.message.includes("\"Bitwarden vault\" (omarchy-shell io.github.elevate08.qs-bitwarden-cli toggle)"),
+  !toggle.ok && toggle.message.includes("\"Bitwarden vault\" (dms ipc call bitwarden toggle)"),
   toggle.message)
 check("a mouse bind and another submap do not conflict",
   Model.autoTypeChordCheck("SUPER + ALT + R", none).ok, JSON.stringify(Model.autoTypeChordCheck("SUPER + ALT + R", none)))

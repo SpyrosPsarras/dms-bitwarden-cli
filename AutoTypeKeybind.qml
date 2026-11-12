@@ -1,6 +1,5 @@
 import QtQuick
-import qs.Commons
-import qs.Ui
+import "DmsUi"
 import "BitwardenModel.js" as Model
 
 // Under "Auto-type logins" while it is on: which key runs the autoType IPC,
@@ -26,7 +25,7 @@ Column {
 
   PanelSectionHeader {
     textFormat: Text.PlainText
-    text: "AUTO-TYPE KEY"
+    text: Tr.text("AUTO-TYPE KEY")
     foreground: section.panel.fg
     fontFamily: section.panel.fontFamily
   }
@@ -40,7 +39,7 @@ Column {
       textFormat: Text.PlainText
       anchors.verticalCenter: parent.verticalCenter
       text: section.keybind.bound ? "󰄬" : "󰌌"
-      color: section.keybind.bound && section.keybind.live !== false ? Color.accent : section.panel.dim
+      color: section.keybind.bound && section.keybind.live !== false ? DmsColor.accent : section.panel.dim
       font.family: section.panel.fontFamily
       font.pixelSize: Style.font.body
     }
@@ -112,9 +111,9 @@ Column {
 
     Button {
       visible: section.choosing && section.keybind.canRegister
-      text: "Register Keybinding"
+      text: Tr.text("Register Keybinding")
       iconText: "󰌌"
-      tooltipText: "Add this key to " + Model.autoTypeBindingsDisplayPath() + " and reload Hyprland"
+      tooltipText: Tr.format("Add this key to %1 and reload Hyprland", Model.autoTypeBindingsDisplayPath())
       fontFamily: section.panel.fontFamily
       fontSize: Style.font.bodySmall
       enabled: section.chordCheck.ok && !section.vault.autoTypeKeybindBusy
@@ -124,9 +123,9 @@ Column {
     // For bindings kept somewhere else; the line is not a secret.
     Button {
       visible: section.choosing
-      text: "Copy Line"
+      text: Tr.text("Copy Line")
       iconText: "󰆏"
-      tooltipText: section.chordCheck.line !== "" ? section.chordCheck.line : "Type a valid key combination first"
+      tooltipText: section.chordCheck.line !== "" ? section.chordCheck.line : Tr.text("Type a valid key combination first")
       fontFamily: section.panel.fontFamily
       fontSize: Style.font.bodySmall
       enabled: section.chordCheck.line !== ""
@@ -136,9 +135,9 @@ Column {
     // Only the two lines this plugin wrote, exactly as it wrote them.
     Button {
       visible: section.keybind.bound && section.keybind.removable === true
-      text: "Remove Keybinding"
+      text: Tr.text("Remove Keybinding")
       iconText: "󰩹"
-      tooltipText: "Delete the lines this plugin added to " + Model.autoTypeBindingsDisplayPath()
+      tooltipText: Tr.format("Delete the lines this plugin added to %1", Model.autoTypeBindingsDisplayPath())
       fontFamily: section.panel.fontFamily
       fontSize: Style.font.bodySmall
       enabled: !section.vault.autoTypeKeybindBusy
