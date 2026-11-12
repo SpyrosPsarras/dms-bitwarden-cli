@@ -149,15 +149,16 @@ missing entry (exit 1 with no stderr) counts as already removed.
 
 `pinentry/omarchy-pinentry` is a Node program that speaks the pinentry
 protocol to the helper, and for each `GETPIN` it starts a Quickshell of its
-own, separate from the shell, that shows a card over the monitor that was
-focused when the prompt opened, drawn like the shell's polkit prompt: the
-theme's `[polkit]` scrim, a padlock and a masked field in the system font, the
-theme's colours, border and rounding. It quits once it has answered. Both are
-children of the helper and have its zero core-file limit; Quickshell's crash
-handler, which would write a dump and its log under `~/.cache/quickshell`, is
-turned off for that process. It needs `quickshell`, `node` (which `bw` needs
-anyway), the Omarchy shell kit and a Wayland display, and is not installed
-separately: it ships in the plugin.
+own, separate from the shell, that shows a card over the output that was
+focused when the prompt opened (asked of niri, else Hyprland): a scrim, a
+padlock and a masked field, drawn with the panel's DmsUi controls in the DMS
+colours, font and rounding the panel passes in `QSBW_PE_THEME`. DMS's own
+`Common` modules are not loaded there; `pinentry/Common/Theme.qml` stands in
+for them. It quits once it has answered. Both are children of the helper and
+have its zero core-file limit; Quickshell's crash handler, which would write
+a dump and its log under `~/.cache/quickshell`, is turned off for that
+process. It needs `quickshell`, `node` (which `bw` needs anyway) and a
+Wayland display, and is not installed separately: it ships in the plugin.
 
 Before 1.12.0 the plugin ran `pinentry-qt` or `pinentry` from `PATH`, and on
 some systems `pinentry` picks `pinentry-gnome3`, which hands the prompt to

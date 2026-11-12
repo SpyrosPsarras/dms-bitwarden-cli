@@ -1,6 +1,6 @@
 # Bitwarden Dankbar
 
-> Version 1.11.6-dms.7: security core ported from upstream 1.11.6. Build all three
+> Version 1.12.0-dms.1: merged with upstream 1.12.0. Build all three
 > helpers after updating with [**Build helpers**](docs/vault-helper.md#if-the-helper-is-missing-or-fails)
 > or `./scripts/build-helpers.sh`. DMS runs only local builds;
 > a missing or failed vault helper keeps the vault locked.
@@ -8,10 +8,10 @@
 The vault now lives in a separate process with core dumps disabled. The panel
 receives a redacted list and loads item secrets only when needed. Protected items
 require the master password before revealing, copying, editing, or exporting.
-Master passwords and PINs use a separate `pinentry` window by default.
+Master passwords and PINs use the plugin's own unlock prompt by default.
 
-Runtime additions: `pinentry` (preferably `pinentry-qt`) and `argon2` for quick
-unlock; Rust/Cargo is needed to build the helpers. On Arch, install these using
+Runtime additions: `argon2` for quick unlock and, only for the optional
+auto-type, `wtype`; Rust/Cargo is needed to build the helpers. On Arch, install these using
 your package manager, then run the build script above. Fingerprint verification
 still uses DMS's `assets/pam/fprint`. Quick-unlock data is encrypted and sealed to
 this machine; existing entries migrate when successfully used. Do not delete
@@ -52,7 +52,9 @@ Translations are shipped in `translations/de.json` and loaded through DMS's plug
   missing; setup offers wl-clipboard on DMS installations that lack either tool.
 - Rust/Cargo (`rust` on Arch) to build the vault, unlock-key and SSH helpers with
   `./scripts/build-helpers.sh`.
-- `pinentry-qt` (or another `pinentry`) and `argon2` for quick unlock.
+- `argon2` for quick unlock. The unlock prompt needs `node` and `quickshell`,
+  which `bw` and DMS already need; `pinentry-qt` is no longer used.
+- `wtype`, only for the optional auto-type.
 - A running Secret Service provider (for example `gnome-keyring`) and `secret-tool` for remembering sessions, PIN and fingerprint unlock. Installing `libsecret` alone provides only the client, not a keyring service.
 - `gdbus` and `systemd-inhibit` for the suspend monitor.
 - An enrolled fingerprint and DMS's `assets/pam/fprint` configuration for fingerprint unlock.
@@ -187,6 +189,57 @@ Non-secret preferences are stored through DMS `PluginService`, under the `bitwar
 
 Defaults include a 15-minute vault timeout, locking with the desktop and on suspend, and a 30-second clipboard timeout. The port follows DMS `IdleService.isShellLocked` immediately without spawning an IPC polling process. SSH approval also reads this live state. The original suspend inhibitor and secret/session cleanup remain in place.
 
+### Unlock prompt
+
+With **Type secrets in a separate prompt** on (the default), the master
+password and PIN are typed into the plugin's own prompt,
+`pinentry/omarchy-pinentry`, not into the panel. The vault helper starts it
+for each prompt as a short-lived Quickshell of its own, which draws a card
+over the focused output (niri's, or Hyprland's) with the panel's DmsUi
+controls in the DMS theme the panel hands it. It never loads DMS's own
+`Common` modules, Omarchy or `Quickshell.Hyprland`. The SSH approval popup
+still hides while it asks to unlock. Where it cannot run (no Wayland display,
+`quickshell` or `node`), the panel says so and offers its own field. See
+[docs/vault-helper.md](docs/vault-helper.md#typing-into-pinentry).
+
+### Automatic sync
+
+**Settings → General → Automatically sync every** (`autoSyncMinutes`, default
+15 minutes, `0` turns it off) syncs the unlocked vault in the background, also
+with the panel closed. A failed sync keeps the vault you have and shows
+"Automatic sync failed" in the panel; it is retried at the same interval.
+
+Each sync reloads the item list, which hands the SSH agent its keys again and
+ends every SSH approval grant. So automatic sync waits while an SSH request
+waits for approval, and while any **until screen lock** grant is live. It
+resumes at the next check (every 30 seconds) after the screen lock or a revoke
+ends the grant. A timed grant does not hold it. A sync you start
+yourself (`r`, the Sync button or `dms ipc call bitwarden sync`) is not held,
+and ends the grants as before.
+
+### Auto-type
+
+Off by default. With **Settings → General → Auto-type logins** on (it asks
+you to press again), <kbd>Ctrl</kbd>+<kbd>C</kbd> in the panel copies the
+highlighted login's password and arms it for 30 seconds;
+`dms ipc call bitwarden autoType` then types its username, Tab and password
+into the focused window with `wtype`, once. Whatever window has focus gets
+the password, and while a login is armed any program running as you can make
+it type. It does not type while the panel, the SSH popup or the unlock prompt
+has the keyboard, or while DMS reports the screen locked.
+
+Under the setting, the panel's key screen can register a Hyprland binding in
+`~/.config/hypr/bindings.lua`. Without a Hyprland config, as on niri, it
+writes nothing; bind the command in `~/.config/niri/config.kdl` instead:
+
+```kdl
+binds {
+    Mod+Ctrl+Backslash { spawn "dms" "ipc" "call" "bitwarden" "autoType"; }
+}
+```
+
+### Data locations
+
 Vault data and account configuration belong to the official Bitwarden CLI. Session handoff files use `$XDG_RUNTIME_DIR/qs-bitwarden-cli`; learned non-secret application associations use `~/.local/state/qs-bitwarden-cli`. The original keyring service name is retained. Do not run this port and the Omarchy version against the same session simultaneously.
 
 ## IPC and shortcuts
@@ -198,6 +251,7 @@ dms ipc call bitwarden close
 dms ipc call bitwarden settings
 dms ipc call bitwarden lock
 dms ipc call bitwarden sync
+dms ipc call bitwarden autoType
 dms ipc call bitwarden status
 dms ipc call bitwarden sshAgentStatus
 ```
