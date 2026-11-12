@@ -29,15 +29,14 @@ Scope {
   property bool finished: false
   property bool wasConnected: false
 
-  // The monitor focused when the prompt was asked for, else none, which
-  // leaves the choice to the compositor (niri takes the focused output).
+  // The monitor focused when the prompt was asked for, else the first.
   readonly property var targetScreen: {
     var wanted = root.ask ? String(root.ask.monitor || "") : ""
     var screens = Quickshell.screens
     for (var i = 0; wanted && i < screens.length; i++) {
       if (screens[i].name === wanted) return screens[i]
     }
-    return null
+    return screens.length > 0 ? screens[0] : null
   }
 
   function finish(line) {

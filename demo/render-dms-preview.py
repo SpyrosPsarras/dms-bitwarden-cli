@@ -153,7 +153,7 @@ Rectangle {
 panel_stub = tmp/'DmsUi/KeyboardPanel.qml'
 panel_stub.write_text(panel_stub.read_text().replace('Math.min(value, 520)', f'Math.min(value, {args.panel_width})'))
 for component in (tmp/'DmsUi').glob('*.qml'):
- if component.stem not in ['Style','DmsColor','Border','Util','Tr']:
+ if component.stem not in ['Style','DmsColor','Border','Util','Tr','BorderSurface']:
   with (tmp/'DmsUi/qmldir').open('a') as f:f.write(f'{component.stem} 1.0 {component.name}\n')
 fixture=json.loads((repo/'demo/fixtures.json').read_text())
 fixture['items']=[x for x in fixture['items'] if x.get('name') in ['GitHub','Home Assistant','Acme Grafana','Acme VPN','Dana Demo','Demo Card']]
