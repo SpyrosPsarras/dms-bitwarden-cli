@@ -170,6 +170,11 @@ keyring and machine credentials. It is not a boundary against malicious code
 running as you. Use master-password-only unlock if that trade-off is unsuitable.
 PIN unlock is optional and has the offline-guessing limits described above.
 
+Turning the setting off deletes the stored password itself, for every account
+whose stored password had a fingerprint way in. The next unlock with your
+master password stores it again under a new key, and
+PIN and FIDO2 unlock for those accounts must be set up again.
+
 ## Settings and locking
 
 Use the settings screen inside the panel, or the **Open Bitwarden settings** button in DMS's plugin settings.

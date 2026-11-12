@@ -445,7 +445,7 @@ for (const [where, text] of [["manifest", manifestFp], ["settings screen", schem
     text.endsWith(fpDeletes) && !/removes the fingerprint's access/.test(text), text)
 }
 check("the README's fingerprint section says the same",
-  /### Fingerprint unlock[\s\S]*?Turning the setting off deletes the stored password itself[\s\S]*?PIN and FIDO2 unlock for those accounts must be set up again[\s\S]*?### FIDO2 key unlock/
+  /## Fingerprint unlock[\s\S]*?Turning the setting off deletes the stored password itself[\s\S]*?PIN and FIDO2 unlock for those accounts must be set up again[\s\S]*?## Settings and locking/
     .test(read("README.md")), "")
 for (const [pin, confirm, wantErr] of [
   ["12345",  "12345",  true],   // too short
