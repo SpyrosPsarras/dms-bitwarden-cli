@@ -1,6 +1,6 @@
 # Bitwarden Dankbar
 
-> Version 1.12.0-dms.1: merged with upstream 1.12.0. Build all three
+> Version 1.12.0-dms.2: merged with upstream 1.12.0. Build all three
 > helpers after updating with [**Build helpers**](docs/vault-helper.md#if-the-helper-is-missing-or-fails)
 > or `./scripts/build-helpers.sh`. DMS runs only local builds;
 > a missing or failed vault helper keeps the vault locked.

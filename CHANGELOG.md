@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.12.0-dms.2] - 2026-11-12
+
+### Fixed
+
+- Opening the panel no longer ends SSH approval grants. Its refresh of a list
+  older than a minute read the vault again with the SSH keys, and every key
+  load ends all grants and fails requests waiting for approval. That refresh
+  now leaves keys the agent already holds for the unlocked vault alone. An
+  unlock, account switch or sync still hands them over again.
+
 ## [1.12.0-dms.1] - 2026-11-12
 
 - Merge upstream 1.11.7, 1.11.8 and 1.12.0 into the DMS port. The fork's 51

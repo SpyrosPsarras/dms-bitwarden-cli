@@ -6746,10 +6746,10 @@ Item {
   // Items, organizations, folders and collections together: each is its own bw start, and
   // bw spends most of one waiting, so queueing them only added ~3 s. On a
   // session `bw status` has not confirmed yet, the metadata waits for it.
-  function beginInitialVaultLoad(showSpinner, forceMetadata) {
+  function beginInitialVaultLoad(showSpinner, forceMetadata, keepAgentKeys) {
     metadataLoadPending = true
     metadataForceRefresh = forceMetadata === true
-    loadItems(showSpinner)
+    loadItems(showSpinner, keepAgentKeys)
     loadPendingMetadata()
   }
 
@@ -6775,11 +6775,14 @@ Item {
       if (!stale) return
     }
 
-    beginInitialVaultLoad(!haveItems, false)
+    // This read only re-reads bw's local cache, and a key load ends every SSH
+    // grant: keys the agent already has for this vault stay.
+    var keysCurrent = sshAgentLoadedForVaultEpoch === vaultEpoch && !autoSyncReloadPending
+    beginInitialVaultLoad(!haveItems, false, keysCurrent)
   }
 
   // `showSpinner` defaults to true; background refreshes pass false.
-  function loadItems(showSpinner) {
+  function loadItems(showSpinner, keepAgentKeys) {
     if (!session) {
       abandonSyncReload()
       return
@@ -6795,7 +6798,7 @@ Item {
       if (!vaultReadIsStale("items")) errorMessage = Model.vaultListBlockedMessage(dependencies)
       return
     }
-    startVaultListRead(false)
+    startVaultListRead(false, keepAgentKeys)
   }
 
   // The reload a sync ends with (onSyncFinished(), maybeAutoSync()) cannot
@@ -6810,12 +6813,12 @@ Item {
   }
 
   // The only launcher of the item read, with or without the agent branch.
-  // `retrying` (after a failed fan-out) never carries the branch.
-  function startVaultListRead(retrying) {
+  // `retrying` (after a failed fan-out) and `keepAgentKeys` never carry the branch.
+  function startVaultListRead(retrying, keepAgentKeys) {
     // Keys go to the agent only from a read of a confirmed session;
     // maybeStartupLoad() loads them once the status has confirmed it.
     listReadEarly = status !== "unlocked"
-    var useAgent = !retrying && !listReadEarly && sshAgentGateOpen && Model.isValidLoadId(sshAgentNextLoadId)
+    var useAgent = !retrying && !listReadEarly && keepAgentKeys !== true && sshAgentGateOpen && Model.isValidLoadId(sshAgentNextLoadId)
     if (useAgent) {
       sshAgentEpoch += 1
       sshAgentLoadId = sshAgentNextLoadId
