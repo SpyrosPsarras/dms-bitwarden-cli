@@ -13,17 +13,46 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${1:-$REPO/docs/screenshots}"
 IPC=(qs -p /usr/share/omarchy/shell/shell.qml ipc call io.github.elevate08.qs-bitwarden-cli)
 
-for tool in grim magick wtype hyprctl quickshell /usr/bin/python3; do
+for tool in grim magick wtype hyprctl quickshell ssh-keygen /usr/bin/python3; do
   command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
 done
 
 mkdir -p "$OUT"
 
+# The fixture vault's SSH key, made fresh for this run and deleted with it,
+# so no private key is ever committed. demo/bin/bw reads it from here.
+DEMO_KEY_DIR="$(mktemp -d)"
+ssh-keygen -q -t ed25519 -N '' -C demo@example.com -f "$DEMO_KEY_DIR/id_ed25519"
+export QSBW_DEMO_SSH_KEY="$DEMO_KEY_DIR/id_ed25519"
+
+# The fixture shell's own data and state. The plugin keeps its account list,
+# learned suggestions and projected SSH keys under these, and the fixture
+# shell must not read or rewrite yours; the keyring is already a shim
+# (demo/bin/secret-tool). Your config (shell.json) and runtime dir are shared,
+# since the shell needs them to draw at all.
+DEMO_DIRS="$(mktemp -d)"
+# The locator's stderr, per run: a fixed /tmp name could be pre-created by
+# another user or read by one, and would hold a shared file between runs.
+FIND_PANEL_ERR="$(mktemp)"
+DEMO_DATA="$DEMO_DIRS/data"
+DEMO_STATE="$DEMO_DIRS/state"
+(umask 077 && mkdir -p "$DEMO_DATA/qs-bitwarden-cli/accounts" "$DEMO_STATE")
+
+# A second, made-up account beside the fixture's, so the locked screen offers
+# Switch Account and the account list has something to list. Never signed in:
+# only its row is ever drawn. Not for the login shot, which shows a first run.
+seed_second_account() {
+  cat > "$DEMO_DATA/qs-bitwarden-cli/accounts/registry.json" <<'JSON'
+{"version":1,"active":"default","accounts":[{"slot":"0123456789abcdef","email":"work@example.com","userId":"11111111-1111-1111-1111-111111111111","server":"https://vault.bitwarden.eu","lastUsed":1}]}
+JSON
+}
+
 restore() {
   echo "restoring the real shell..."
-  # The fixture vault's SSH key gets projected to the same directory the real
-  # one uses. The real shell rewrites its own keys on the next load but will
-  # not remove a file it never wrote, so a demo key would sit there for good.
+  rm -rf -- "$DEMO_KEY_DIR" "$DEMO_DIRS"
+  rm -f -- "$FIND_PANEL_ERR"
+  # Before the fixture shell had its own data dir, its SSH key was projected
+  # beside the real ones; the real shell never removes a file it did not write.
   rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/qs-bitwarden-cli/ssh/Demo Deploy Key.pub"
   pkill -f "quickshell -n -p /usr/share/omarchy/shell" 2>/dev/null || true
   sleep 1
@@ -41,6 +70,7 @@ start_shell() {
   pkill -f "quickshell -n -p /usr/share/omarchy/shell" 2>/dev/null || true
   sleep 1
   PATH="$REPO/demo/bin:$PATH" QSBW_DEMO_STATUS="$1" \
+    XDG_DATA_HOME="$DEMO_DATA" XDG_STATE_HOME="$DEMO_STATE" \
     nohup quickshell -n -p /usr/share/omarchy/shell >/dev/null 2>&1 &
   sleep 6
   # Park the pointer so hover states and tooltips stay out of the shots.
@@ -56,14 +86,14 @@ shot() { # shot <name>
   local box err
   # Keep the locator's own reason. Swallowing it turned a theme change into
   # six identical "could not locate the panel border" lines and no clue why.
-  if box="$(/usr/bin/python3 "$REPO/demo/find_panel.py" "$OUT/.raw.png" 2>/tmp/find_panel.err)"; then
+  if box="$(/usr/bin/python3 "$REPO/demo/find_panel.py" "$OUT/.raw.png" 2>"$FIND_PANEL_ERR")"; then
     magick "$OUT/.raw.png" -crop "$box" +repage "$OUT/$1.png"
     echo "  wrote $1.png  ($box)"
   else
-    err="$(cat /tmp/find_panel.err)"
+    err="$(cat "$FIND_PANEL_ERR")"
     echo "  SKIPPED $1: ${err:-could not locate the panel border}" >&2
   fi
-  rm -f /tmp/find_panel.err
+  : > "$FIND_PANEL_ERR"
   if [ -n "${QSBW_KEEP_RAW:-}" ]; then mv -f "$OUT/.raw.png" "$OUT/.raw-$1.png" 2>/dev/null || true
   else rm -f "$OUT/.raw.png"; fi
 }
@@ -96,16 +126,16 @@ clear_search() {
 # --- SSH signing approval ---------------------------------------------------
 #
 # The approval screen exists only while a real signing request is waiting, so
-# it cannot be navigated to -- it has to be raised. `ssh-add -T` asks the agent
-# to sign one challenge with one key and nothing else, which is the smallest
-# request that produces this prompt.
+# it cannot be navigated to -- it has to be raised, here with the signature Git
+# asks for on every signed commit.
 #
-# Everything here is the fixture vault: the key is the throwaway pair in
-# fixtures.json, and the socket belongs to the fixture shell started above.
+# Everything here is the fixture vault: the key is the throwaway pair made at
+# the top of this script, and the socket belongs to the fixture shell started
+# above.
 # The request is denied rather than approved, so no signature is ever made.
 capture_ssh_approval() {
   local sock="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/qs-bitwarden-cli/ssh-agent.sock"
-  local pub="${XDG_DATA_HOME:-$HOME/.local/share}/qs-bitwarden-cli/ssh/Demo Deploy Key.pub"
+  local pub="$DEMO_DATA/qs-bitwarden-cli/ssh/Demo Deploy Key.pub"
 
   # The helper starts with the panel and projects its public keys after the
   # vault loads, so wait for the file rather than guessing at a delay.
@@ -119,10 +149,18 @@ capture_ssh_approval() {
     fi
   done
 
-  "${IPC[@]}" open >/dev/null 2>&1; sleep 2
+  # Closed: with the centered approval popup (the default) the prompt is its
+  # own card, and an open panel behind it is the larger accent rectangle the
+  # cropper would pick instead. With the popup off the request opens the
+  # panel itself.
+  "${IPC[@]}" close >/dev/null 2>&1; sleep 2
   # In the background: it blocks until the prompt is answered, which is the
   # point -- the prompt has to still be on screen when the shot is taken.
-  SSH_AUTH_SOCK="$sock" ssh-add -T "$pub" >/dev/null 2>&1 &
+  # A Git commit signature (SSHSIG, namespace "git"), the everyday request:
+  # the prompt names it and offers the timed approval, which `ssh-add -T`'s
+  # unrecognised challenge never does. The signed file is a throwaway.
+  printf 'demo commit\n' > "$DEMO_DIRS/commit.txt"
+  SSH_AUTH_SOCK="$sock" ssh-keygen -Y sign -n git -f "$pub" "$DEMO_DIRS/commit.txt" >/dev/null 2>&1 &
   local asker=$!
   sleep "${QSBW_SSH_SETTLE:-4}"
   shot 13-ssh-approval
@@ -137,6 +175,7 @@ capture_ssh_approval() {
 # iterated on, and re-running the whole sequence to retake it costs a minute
 # and five shells.
 if [ -n "${QSBW_ONLY_SSH:-}" ]; then
+  seed_second_account
   start_shell unlocked
   capture_ssh_approval
   echo "done -> $OUT"
@@ -155,6 +194,10 @@ start_shell unauthenticated
 "${IPC[@]}" open >/dev/null 2>&1; sleep 4
 shot 12-login
 "${IPC[@]}" close >/dev/null 2>&1 || true
+# QSBW_ONLY_LOGIN=1 retakes this shot alone.
+if [ -n "${QSBW_ONLY_LOGIN:-}" ]; then echo "done -> $OUT"; exit 0; fi
+
+seed_second_account
 
 # --- locked -----------------------------------------------------------------
 
@@ -205,6 +248,11 @@ wtype -k Escape 2>/dev/null; sleep 1
 
 wtype -M alt -k comma -m alt 2>/dev/null; sleep 3
 shot 10-settings
+wtype -k Escape 2>/dev/null; sleep 1
+
+# The fixture account and the made-up second one (see DEMO_DIRS above).
+wtype -M alt -k a -m alt 2>/dev/null; sleep 2
+shot 14-accounts
 
 "${IPC[@]}" close >/dev/null 2>&1 || true
 
