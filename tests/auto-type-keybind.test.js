@@ -503,7 +503,7 @@ check("the row draws the model's text, not its own",
   }
   const proc = () => ({ running: false, command: [], chord: "" })
   const v = make({
-    Model, autoTypeKeybind: Model.autoTypeKeybindState(null), autoTypeChordText: "", autoTypeKeybindBusy: false,
+    Model, Tr: { format: Model.formatText }, autoTypeKeybind: Model.autoTypeKeybindState(null), autoTypeChordText: "", autoTypeKeybindBusy: false,
     autoTypeKeybindResult: null, autoTypeKeybindRecheck: false, autoTypeChordCheck: null,
     autoTypeKeybindInspectProc: proc(), autoTypeKeybindActionProc: proc(), flashes: [], detached: [],
     flashNotification(m) { v.flashes.push(m) },

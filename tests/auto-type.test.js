@@ -103,7 +103,7 @@ function makeVault() {
   const timer = name => ({ running: false, interval: 0, restart() { this.running = true; calls.push(name + ".restart") },
     stop() { this.running = false } })
   const v = {
-    Model, calls, autoTypeEnabled: true, status: "unlocked", session: "held", vaultEpoch: 3, closeOnCopy: true,
+    Model, Tr: { format: Model.formatText }, calls, autoTypeEnabled: true, status: "unlocked", session: "held", vaultEpoch: 3, closeOnCopy: true,
     autoTypeItemId: "", autoTypeArmEpoch: -1, autoTypeBusy: false, autoTypeSeq: 0, autoTypePendingText: "",
     autoTypeTypedItemId: "", autoTypeTypedEpoch: -1, autoCopyTotpSec: 3, fetches: [],
     totpFollowupItem: null, totpFollowupActive: false,

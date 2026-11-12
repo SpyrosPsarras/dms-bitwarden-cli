@@ -1425,25 +1425,35 @@ function autoTypeBindingsDisplayPath() {
 
 function autoTypeChordSuggestions() { return AUTO_TYPE_CHORD_SUGGESTIONS.slice() }
 
+// Tr.format() without a translation, for callers that pass none.
+function formatText(term) {
+  var values = Array.prototype.slice.call(arguments, 1)
+  return String(term).replace(/%([1-9][0-9]*)/g, function(match, index) {
+    var value = values[Number(index) - 1]
+    return value === undefined ? match : String(value)
+  })
+}
+
 // The chord grammar o.bind() takes: modifiers from SUPER, SHIFT, CTRL and ALT
 // joined by " + ", then one key name. Case and spacing are forgiven and
 // normalised; anything else is refused with the reason. One of SUPER, CTRL or
 // ALT is required, so plain typing (Shift included) can never set it off.
-function autoTypeChord(raw) {
+function autoTypeChord(raw, format) {
+  var fmt = format || formatText
   var text = (raw === undefined || raw === null) ? "" : String(raw)
   function fail(message) { return { ok: false, chord: "", modmask: 0, key: "", message: message } }
-  if (text.trim() === "") return fail("Type a key combination, such as " + AUTO_TYPE_CHORD_SUGGESTIONS[0] + ".")
-  if (text.length > CHORD_MAX_LENGTH) return fail("That is too long for a key combination.")
+  if (text.trim() === "") return fail(fmt("Type a key combination, such as %1.", AUTO_TYPE_CHORD_SUGGESTIONS[0]))
+  if (text.length > CHORD_MAX_LENGTH) return fail(fmt("That is too long for a key combination."))
   if (!/^[A-Za-z0-9_+ ]+$/.test(text)) {
-    return fail("Use only letters, digits, _ and +, as in " + AUTO_TYPE_CHORD_SUGGESTIONS[0] + ".")
+    return fail(fmt("Use only letters, digits, _ and +, as in %1.", AUTO_TYPE_CHORD_SUGGESTIONS[0]))
   }
   var parts = text.split("+")
   for (var i = 0; i < parts.length; i++) {
     parts[i] = parts[i].trim()
-    if (parts[i] === "") return fail("Put one key name between each +.")
-    if (/\s/.test(parts[i])) return fail("Join the modifiers and the key with +, as in " + AUTO_TYPE_CHORD_SUGGESTIONS[0] + ".")
+    if (parts[i] === "") return fail(fmt("Put one key name between each +."))
+    if (/\s/.test(parts[i])) return fail(fmt("Join the modifiers and the key with +, as in %1.", AUTO_TYPE_CHORD_SUGGESTIONS[0]))
   }
-  if (parts.length < 2) return fail("Hold SUPER, CTRL or ALT with the key, as in " + AUTO_TYPE_CHORD_SUGGESTIONS[0] + ".")
+  if (parts.length < 2) return fail(fmt("Hold SUPER, CTRL or ALT with the key, as in %1.", AUTO_TYPE_CHORD_SUGGESTIONS[0]))
   var key = parts.pop()
   var mods = []
   var modmask = 0
@@ -1451,18 +1461,18 @@ function autoTypeChord(raw) {
     var name = parts[m].toUpperCase()
     if (name === "CONTROL") name = "CTRL"
     if (!CHORD_MODIFIER_BITS.hasOwnProperty(name)) {
-      return fail("\"" + parts[m] + "\" is not a modifier; use SUPER, SHIFT, CTRL or ALT.")
+      return fail(fmt("\"%1\" is not a modifier; use SUPER, SHIFT, CTRL or ALT.", parts[m]))
     }
-    if (modmask & CHORD_MODIFIER_BITS[name]) return fail(name + " is in there twice.")
+    if (modmask & CHORD_MODIFIER_BITS[name]) return fail(fmt("%1 is in there twice.", name))
     modmask |= CHORD_MODIFIER_BITS[name]
     mods.push(name)
   }
   var upperKey = key.toUpperCase()
   if (CHORD_MODIFIER_BITS.hasOwnProperty(upperKey) || upperKey === "CONTROL") {
-    return fail("End with the key to press, after the modifiers.")
+    return fail(fmt("End with the key to press, after the modifiers."))
   }
   if (!(modmask & (CHORD_MODIFIER_BITS.SUPER | CHORD_MODIFIER_BITS.CTRL | CHORD_MODIFIER_BITS.ALT))) {
-    return fail("Hold SUPER, CTRL or ALT with the key, so ordinary typing never sets it off.")
+    return fail(fmt("Hold SUPER, CTRL or ALT with the key, so ordinary typing never sets it off."))
   }
   // Hyprland looks key names up case-insensitively; XF86 names keep their
   // usual spelling.
@@ -1623,12 +1633,13 @@ function parseAutoTypeKeybindInspection(raw) {
 }
 
 // What the keybinding row shows, from parseAutoTypeKeybindInspection().
-function autoTypeKeybindState(inspection) {
+function autoTypeKeybindState(inspection, format) {
+  var fmt = format || formatText
   var where = autoTypeBindingsDisplayPath()
   if (!inspection) {
     return { checked: false, bound: false, chord: "", live: false, removable: false, removableChord: "",
       hyprctl: false, binds: [], fileBinds: [], canRegister: false,
-      status: "Checking the keybinding...", detail: "", blocked: "", setupNote: "" }
+      status: fmt("Checking the keybinding..."), detail: "", blocked: "", setupNote: "" }
   }
   var binds = inspection.binds || []
   var parsed = inspection.bindings || parseBindingsLua("")
@@ -1636,9 +1647,9 @@ function autoTypeKeybindState(inspection) {
     checked: true, bound: false, chord: "", live: false, removable: false, removableChord: "",
     hyprctl: inspection.binds !== null && inspection.binds !== undefined,
     binds: binds, fileBinds: parsed.binds, canRegister: false,
-    status: "No keybinding yet", detail: "", blocked: "",
+    status: fmt("No keybinding yet"), detail: "", blocked: "",
     // The setup screen's line under wtype.
-    setupNote: "No keybinding yet: register one under Settings > General > Auto-type logins."
+    setupNote: fmt("No keybinding yet: register one under Settings > General > Auto-type logins.")
   }
 
   var hit = parsed.autoType
@@ -1662,37 +1673,36 @@ function autoTypeKeybindState(inspection) {
       }
     }
     state.detail = (parsed.removable && parsed.autoTypeCount === 1
-      ? "Added by this plugin on line " + hit.line + " of " + where + "."
-      : "Set on line " + hit.line + " of " + where + "; change or remove it there.")
-      + (parsed.autoTypeCount > 1 ? " " + parsed.autoTypeCount + " lines there run auto-type." : "")
+      ? fmt("Added by this plugin on line %1 of %2.", hit.line, where)
+      : fmt("Set on line %1 of %2; change or remove it there.", hit.line, where))
+      + (parsed.autoTypeCount > 1 ? " " + fmt("%1 lines there run auto-type.", parsed.autoTypeCount) : "")
     if (state.hyprctl && !state.live) {
-      state.detail += " Hyprland has not loaded it yet: save the file again or run hyprctl reload."
+      state.detail += " " + fmt("Hyprland has not loaded it yet: save the file again or run hyprctl reload.")
     }
   } else if (live) {
     state.bound = true
     state.live = true
     state.chord = chordFromHyprBind(live)
-    state.detail = "Set outside " + where + "; change or remove it where you added it."
+    state.detail = fmt("Set outside %1; change or remove it where you added it.", where)
   }
   if (state.bound) {
-    state.status = state.chord ? "Bound to " + state.chord : "Bound to a key"
-    state.setupNote = "Keybinding: " + (state.chord || "set") + "."
+    state.status = state.chord ? fmt("Bound to %1", state.chord) : fmt("Bound to a key")
+    state.setupNote = state.chord ? fmt("Keybinding: %1.", state.chord) : fmt("Keybinding: set.")
     return state
   }
 
   if (!inspection.home) {
-    state.blocked = "No HOME is set, so there is no " + where + " to add it to."
+    state.blocked = fmt("No HOME is set, so there is no %1 to add it to.", where)
   } else if (inspection.file === "present") {
     state.canRegister = true
   } else if (inspection.file === "absent" && inspection.requires) {
     state.canRegister = true
-    state.detail = where + " does not exist yet; registering creates it, and your hyprland.lua already loads it."
+    state.detail = fmt("%1 does not exist yet; registering creates it, and your hyprland.lua already loads it.", where)
   } else if (inspection.file === "absent") {
-    state.blocked = "Your ~/" + AUTO_TYPE_HYPRLAND_REL + " does not load " + where
-      + ", so the plugin will not create it. Copy the line and add it where your bindings live."
+    state.blocked = fmt("Your ~/%1 does not load %2, so the plugin will not create it. Copy the line and add it where your bindings live.",
+      AUTO_TYPE_HYPRLAND_REL, where)
   } else {
-    state.blocked = where + " is not a regular file this plugin can read, so it is left alone. "
-      + "Copy the line and add it yourself."
+    state.blocked = fmt("%1 is not a regular file this plugin can read, so it is left alone. Copy the line and add it yourself.", where)
   }
   return state
 }
@@ -1700,8 +1710,9 @@ function autoTypeKeybindState(inspection) {
 // The chord field's verdict: the normalised chord, or why it cannot be used,
 // a key already taken included (named by its description, and by its command
 // when bindings.lua has it).
-function autoTypeChordCheck(text, state) {
-  var parsed = autoTypeChord(text)
+function autoTypeChordCheck(text, state, format) {
+  var fmt = format || formatText
+  var parsed = autoTypeChord(text, fmt)
   if (!parsed.ok) return { ok: false, chord: "", line: "", message: parsed.message, note: "" }
   var out = { ok: true, chord: parsed.chord, line: autoTypeBindLine(parsed.chord), message: "", note: "" }
   var fileBinds = (state && state.fileBinds) || []
@@ -1723,7 +1734,7 @@ function autoTypeChordCheck(text, state) {
     if (!holder) return out
   } else {
     if (state && state.checked) {
-      out.note = "hyprctl is not available, so only " + autoTypeBindingsDisplayPath() + " was checked for this key."
+      out.note = fmt("hyprctl is not available, so only %1 was checked for this key.", autoTypeBindingsDisplayPath())
     }
     if (!fileHolder) return out
   }
@@ -1733,14 +1744,21 @@ function autoTypeChordCheck(text, state) {
     : (fileHolder ? fileHolder.command : "")
   if ((holder && hyprBindRunsAutoType(holder)) || isAutoTypeCommand(command)) {
     out.ok = false
-    out.message = parsed.chord + " already runs auto-type."
+    out.message = fmt("%1 already runs auto-type.", parsed.chord)
     return out
   }
+  var where = autoTypeBindingsDisplayPath()
   out.ok = false
-  out.message = parsed.chord + " is already bound"
-    + (label ? " to \"" + label + "\"" : "")
-    + (command ? " (" + command + ")" : (label ? "" : " to another command"))
-    + ". Pick another key, or unbind that one in " + autoTypeBindingsDisplayPath() + " first."
+  if (label && command) {
+    out.message = fmt("%1 is already bound to \"%2\" (%3). Pick another key, or unbind that one in %4 first.",
+      parsed.chord, label, command, where)
+  } else if (label) {
+    out.message = fmt("%1 is already bound to \"%2\". Pick another key, or unbind that one in %3 first.", parsed.chord, label, where)
+  } else if (command) {
+    out.message = fmt("%1 is already bound (%2). Pick another key, or unbind that one in %3 first.", parsed.chord, command, where)
+  } else {
+    out.message = fmt("%1 is already bound to another command. Pick another key, or unbind that one in %2 first.", parsed.chord, where)
+  }
   return out
 }
 
@@ -1824,21 +1842,20 @@ function autoTypeKeybindRemoveCommand(chord) {
 }
 
 // { ok, message } for the row, from either script.
-function parseAutoTypeKeybindResult(exitCode, stdout, chord) {
+function parseAutoTypeKeybindResult(exitCode, stdout, chord, format) {
+  var fmt = format || formatText
   var where = autoTypeBindingsDisplayPath()
   var failures = {}
-  failures[KEYBIND_EXIT_NO_HOME] = { code: "NO_HOME", message: "No HOME is set, so there is no " + where + "." }
+  failures[KEYBIND_EXIT_NO_HOME] = { code: "NO_HOME", message: fmt("No HOME is set, so there is no %1.", where) }
   failures[KEYBIND_EXIT_FILE] = { code: "FILE",
-    message: where + " is not a regular file this plugin can read and write, so it was left alone." }
+    message: fmt("%1 is not a regular file this plugin can read and write, so it was left alone.", where) }
   failures[KEYBIND_EXIT_BOUND] = { code: "BOUND",
-    message: where + " already has a line that runs auto-type, so nothing was added." }
+    message: fmt("%1 already has a line that runs auto-type, so nothing was added.", where) }
   failures[KEYBIND_EXIT_NOT_LOADED] = { code: "NOT_LOADED",
-    message: where + " does not exist and your hyprland.lua does not load it, so it was not created. "
-      + "Copy the line and add it where your bindings live." }
-  failures[KEYBIND_EXIT_WRITE] = { code: "WRITE", message: "Could not write " + where + "." }
+    message: fmt("%1 does not exist and your hyprland.lua does not load it, so it was not created. Copy the line and add it where your bindings live.", where) }
+  failures[KEYBIND_EXIT_WRITE] = { code: "WRITE", message: fmt("Could not write %1.", where) }
   failures[KEYBIND_EXIT_NOT_OURS] = { code: "NOT_OURS",
-    message: "The line this plugin added is no longer there exactly as written, so nothing was removed. "
-      + "Edit " + where + " yourself." }
+    message: fmt("The line this plugin added is no longer there exactly as written, so nothing was removed. Edit %1 yourself.", where) }
   var shown = String(chord || "")
   return parseExitCodeResult(exitCode, stdout, function(out) {
     var lines = out.split("\n")
@@ -1851,14 +1868,14 @@ function parseAutoTypeKeybindResult(exitCode, stdout, chord) {
     }
     var message = action === "appended"
       ? (applied
-        ? "Registered " + shown + ". Arm a login, then press it in the window to type into."
-        : "Added " + shown + " to " + where + ". Hyprland uses it once it reloads its config (hyprctl reload).")
+        ? fmt("Registered %1. Arm a login, then press it in the window to type into.", shown)
+        : fmt("Added %1 to %2. Hyprland uses it once it reloads its config (hyprctl reload).", shown, where))
       : (applied
-        ? "Removed the keybinding this plugin added."
-        : "Removed the keybinding this plugin added. Hyprland drops it once it reloads its config (hyprctl reload).")
-    if (errors) message += " Hyprland reports a config error: " + errors
+        ? fmt("Removed the keybinding this plugin added.")
+        : fmt("Removed the keybinding this plugin added. Hyprland drops it once it reloads its config (hyprctl reload)."))
+    if (errors) message += " " + fmt("Hyprland reports a config error: %1", errors)
     return { ok: true, code: action === "appended" ? "APPENDED" : "REMOVED", message: message, warning: errors !== "" }
-  }, failures, "Could not update " + where + ".")
+  }, failures, fmt("Could not update %1.", where))
 }
 
 // Clears the clipboard only while it holds a copy marked sensitive (ours, or

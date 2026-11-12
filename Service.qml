@@ -8431,10 +8431,10 @@ Item {
   // The key that runs the autoType IPC (see "Auto-type keybinding" in
   // BitwardenModel.js): what bindings.lua and Hyprland have, the chord field
   // under the setting, and the last register or remove's answer.
-  property var autoTypeKeybind: Model.autoTypeKeybindState(null)
+  property var autoTypeKeybind: Model.autoTypeKeybindState(null, Tr.format)
   // "" until the first inspection fills in a free suggestion.
   property string autoTypeChordText: ""
-  readonly property var autoTypeChordCheck: Model.autoTypeChordCheck(autoTypeChordText, autoTypeKeybind)
+  readonly property var autoTypeChordCheck: Model.autoTypeChordCheck(autoTypeChordText, autoTypeKeybind, Tr.format)
   property bool autoTypeKeybindBusy: false
   property var autoTypeKeybindResult: null
   property bool autoTypeKeybindRecheck: false
@@ -8448,7 +8448,7 @@ Item {
   }
 
   function onAutoTypeKeybindInspected(raw) {
-    autoTypeKeybind = Model.autoTypeKeybindState(Model.parseAutoTypeKeybindInspection(raw))
+    autoTypeKeybind = Model.autoTypeKeybindState(Model.parseAutoTypeKeybindInspection(raw), Tr.format)
     if (autoTypeChordText === "") autoTypeChordText = Model.autoTypeChordSuggestion(autoTypeKeybind)
     if (autoTypeKeybindRecheck) {
       autoTypeKeybindRecheck = false
@@ -8481,7 +8481,7 @@ Item {
   }
 
   function onAutoTypeKeybindActionFinished(exitCode, stdout) {
-    autoTypeKeybindResult = Model.parseAutoTypeKeybindResult(exitCode, stdout, autoTypeKeybindActionProc.chord)
+    autoTypeKeybindResult = Model.parseAutoTypeKeybindResult(exitCode, stdout, autoTypeKeybindActionProc.chord, Tr.format)
     autoTypeKeybindBusy = false
     inspectAutoTypeKeybind()
   }
@@ -8494,7 +8494,7 @@ Item {
     var env = {}
     env[Model.clipboardEnvVar()] = line
     Quickshell.execDetached({ command: Model.clipboardCopyPlainCommand(), environment: env })
-    flashNotification("Keybinding line copied")
+    flashNotification(Tr.text("Keybinding line copied"))
   }
 
   function autoTypeArmed() {
@@ -8532,8 +8532,8 @@ Item {
       root.autoTypeItemId = String(item.id)
       root.autoTypeArmEpoch = root.vaultEpoch
       autoTypeArmTimer.restart()
-      root.copyPasswordNow(item, "Password copied; auto-type armed for "
-        + Math.round(Model.autoTypeArmMs() / 1000) + " s")
+      root.copyPasswordNow(item, Tr.format("Password copied; auto-type armed for %1 s",
+        Math.round(Model.autoTypeArmMs() / 1000)))
       root.armTotpFollowup(item)
       if (root.closeOnCopy) root.close()
     })
@@ -8550,7 +8550,7 @@ Item {
     // Something of ours has the keyboard, and would get the text: the
     // panel (its search box, say), the SSH approval card, pinentry.
     if (opened || sshPrompt !== null || pinentryActive) {
-      if (opened) errorMessage = "Close the panel first: auto-type types into the window it returns to"
+      if (opened) errorMessage = Tr.text("Close the panel first: auto-type types into the window it returns to")
       return "panel-open"
     }
     // DMS's IdleService reports the lock live; the arm is kept for the next press.
@@ -8645,7 +8645,7 @@ Item {
     autoTypeTypedEpoch = -1
     if (ok) {
       resetAutoLockTimer()
-      flashNotification("Auto-typed")
+      flashNotification(Tr.text("Auto-typed"))
       copyTotpAfterAutoType(typedId)
       return
     }
@@ -8739,7 +8739,7 @@ Item {
     closeFilterGroup()
     if (!item || !Model.isLoginItem(item)) return
     if (clipboardMissing()) return
-    var copied = notice || "Password copied!"
+    var copied = notice || Tr.text("Password copied!")
     learnFromPick(item)
     if (item.secretsHeld && vaultHelperActive) {
       // The helper hands the password to wl-copy; it never comes here.

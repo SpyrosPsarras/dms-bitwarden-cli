@@ -53,8 +53,13 @@ test('all marked literal UI terms and settings metadata have German translations
             assert.deepEqual(de[term].match(/%[1-9][0-9]*/g)?.sort() || [], term.match(/%[1-9][0-9]*/g)?.sort() || []);
         }
     }
-    const model = new Function(fs.readFileSync(path.join(dir, 'BitwardenModel.js'), 'utf8')
-        .replace(/^\.pragma library\s*$/m, '') + '\nreturn SETTINGS_SCHEMA;')();
+    const modelSource = fs.readFileSync(path.join(dir, 'BitwardenModel.js'), 'utf8');
+    for (const match of modelSource.matchAll(/\bfmt\(("(?:\\.|[^"\\])*")/g)) {
+        const term = JSON.parse(match[1]);
+        assert.ok(de[term], `BitwardenModel.js: missing ${term}`);
+        assert.deepEqual(de[term].match(/%[1-9][0-9]*/g)?.sort() || [], term.match(/%[1-9][0-9]*/g)?.sort() || []);
+    }
+    const model = new Function(modelSource.replace(/^\.pragma library\s*$/m, '') + '\nreturn SETTINGS_SCHEMA;')();
     for (const entry of model) {
         for (const key of ['label', 'description', 'unit', 'zeroLabel']) {
             if (entry[key]) assert.ok(de[entry[key]], `setting ${entry.key}: missing ${entry[key]}`);
