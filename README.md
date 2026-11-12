@@ -213,7 +213,8 @@ Each sync reloads the item list, which hands the SSH agent its keys again and
 ends every SSH approval grant. So automatic sync waits while an SSH request
 waits for approval, and while any **until screen lock** grant is live. It
 resumes at the next check (every 30 seconds) after the screen lock or a revoke
-ends the grant. A timed grant does not hold it. A sync you start
+ends the grant, or the SSH agent stops or is turned off. A timed grant does
+not hold it. A sync you start
 yourself (`r`, the Sync button or `dms ipc call bitwarden sync`) is not held,
 and ends the grants as before.
 
