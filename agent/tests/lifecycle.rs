@@ -696,7 +696,7 @@ fn a_forwarded_connection_lists_keys_without_their_item_names() {
 fn held_listings_answer_each_waiter_by_its_own_forwarding() {
     let mut agent = TestAgent::start();
     let key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519).unwrap();
-    agent.send("{\"v\":1,\"type\":\"options\",\"unlockOnDemand\":true}");
+    agent.send("{\"v\":2,\"type\":\"options\",\"unlockOnDemand\":true}");
     agent.drain_control();
 
     let mut clients = Vec::new();
