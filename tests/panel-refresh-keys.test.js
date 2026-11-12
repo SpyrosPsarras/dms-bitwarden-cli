@@ -101,6 +101,15 @@ const leftAgentAlone = c => c.sshAgentEpoch === 14 && c.written.length === 0
   eq("and the retry starts no second load", c.sshAgentEpoch, 15)
 }
 {
+  const c = fixture(); c.lifecycle = []; c.applySshAgentLifecycle = event => c.lifecycle.push(event)
+  c.beginInitialVaultLoad(true, false); c.listExits(1)
+  c.sshAgentNextLoadId = loadId; c.listExits(0)
+  eq("the successful retry after a failed key load does not reload keys by itself", c.lifecycle.length, 0)
+  c.now += 120000; c.ensureItemsFresh()
+  eq("the next panel read reloads the keys the failed load dropped",
+    c.sshAgentEpoch === 16 && c.listProc.environment[Model.loadIdEnvVar()] === loadId, true)
+}
+{
   const c = fixture(); c.status = "locked"; c.vaultEpoch = 4; c.ensureItemsFresh()
   c.status = "unlocked"; c.listExits(1)
   eq("an early read that failed is read again with keys", tookAgentBranch(c), true)

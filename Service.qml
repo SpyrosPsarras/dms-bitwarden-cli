@@ -3008,7 +3008,8 @@ Item {
   property var sshPendingPublicKeys: []
   property int sshPendingPublicEpoch: -1
   property double sshAgentKeysLoadedAt: 0
-  // The vault epoch a key load was started for, so a startup load runs once.
+  // The vault epoch of the last key load that has not failed, so a startup
+  // load runs once and a panel refresh leaves the keys alone.
   property int sshAgentLoadedForVaultEpoch: -1
   // Auto-retries of a failed FIFO load (one), so a bad payload cannot loop.
   property int sshAgentLoadFailStreak: 0
@@ -3125,6 +3126,9 @@ Item {
     // The first item read usually starts before the handshake; onListFinished()
     // calls back when it lands.
     if (sshAgentLoadActive || listProc.running) return
+    // A key load just failed and the read was retried without it: loading
+    // again now could fail the same way in a loop. The next refresh loads them.
+    if (listRetriedWithoutAgent) return
     if (sshAgentLoadedForVaultEpoch === root.vaultEpoch) return
     // No nonce yet: onSshAgentLoadIdRead() calls back when it is ready.
     if (!Model.isValidLoadId(sshAgentNextLoadId)) {
@@ -6746,10 +6750,10 @@ Item {
   // Items, organizations, folders and collections together: each is its own bw start, and
   // bw spends most of one waiting, so queueing them only added ~3 s. On a
   // session `bw status` has not confirmed yet, the metadata waits for it.
-  function beginInitialVaultLoad(showSpinner, forceMetadata, keepAgentKeys) {
+  function beginInitialVaultLoad(showSpinner, forceMetadata, withoutAgent) {
     metadataLoadPending = true
     metadataForceRefresh = forceMetadata === true
-    loadItems(showSpinner, keepAgentKeys)
+    loadItems(showSpinner, withoutAgent)
     loadPendingMetadata()
   }
 
@@ -6775,14 +6779,14 @@ Item {
       if (!stale) return
     }
 
-    // This read only re-reads bw's local cache, and a key load ends every SSH
-    // grant: keys the agent already has for this vault stay.
-    var keysCurrent = sshAgentLoadedForVaultEpoch === vaultEpoch && !autoSyncReloadPending
-    beginInitialVaultLoad(!haveItems, false, keysCurrent)
+    // This read only re-reads bw's local cache and a key load ends every SSH
+    // grant, so it leaves the agent the keys it already has for this vault.
+    var agentHasKeys = sshAgentLoadedForVaultEpoch === vaultEpoch && !autoSyncReloadPending
+    beginInitialVaultLoad(!haveItems, false, agentHasKeys)
   }
 
   // `showSpinner` defaults to true; background refreshes pass false.
-  function loadItems(showSpinner, keepAgentKeys) {
+  function loadItems(showSpinner, withoutAgent) {
     if (!session) {
       abandonSyncReload()
       return
@@ -6798,7 +6802,7 @@ Item {
       if (!vaultReadIsStale("items")) errorMessage = Model.vaultListBlockedMessage(dependencies)
       return
     }
-    startVaultListRead(false, keepAgentKeys)
+    startVaultListRead(withoutAgent)
   }
 
   // The reload a sync ends with (onSyncFinished(), maybeAutoSync()) cannot
@@ -6813,12 +6817,13 @@ Item {
   }
 
   // The only launcher of the item read, with or without the agent branch.
-  // `retrying` (after a failed fan-out) and `keepAgentKeys` never carry the branch.
-  function startVaultListRead(retrying, keepAgentKeys) {
+  // `withoutAgent` leaves the branch out: the retry of a failed fan-out, or a
+  // refresh while the agent already has this vault's keys.
+  function startVaultListRead(withoutAgent) {
     // Keys go to the agent only from a read of a confirmed session;
     // maybeStartupLoad() loads them once the status has confirmed it.
     listReadEarly = status !== "unlocked"
-    var useAgent = !retrying && !listReadEarly && keepAgentKeys !== true && sshAgentGateOpen && Model.isValidLoadId(sshAgentNextLoadId)
+    var useAgent = !withoutAgent && !listReadEarly && sshAgentGateOpen && Model.isValidLoadId(sshAgentNextLoadId)
     if (useAgent) {
       sshAgentEpoch += 1
       sshAgentLoadId = sshAgentNextLoadId
@@ -6873,10 +6878,12 @@ Item {
     endSshAgentLoad(exitCode === 0)
 
     if (exitCode === 0) {
-      listRetriedWithoutAgent = false
       onListFinished(rawJson)
+      listRetriedWithoutAgent = false
       return
     }
+    // The agent dropped its keys with the failed load.
+    if (hadAgentBranch) sshAgentLoadedForVaultEpoch = -1
 
     // The agent must never cost the item list: retry once without it.
     if (hadAgentBranch && !listRetriedWithoutAgent && !vaultReadIsStale("items")) {
