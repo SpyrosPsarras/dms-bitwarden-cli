@@ -18,7 +18,7 @@ function fixture() {
     opened: true, pinentryActive: false, currentScreen: "main", autoSyncMinutes: 5, lastSyncAttemptAt: 0,
     isLoading: false, isUnlocking: false, logoutPending: false,
     metadataLoadPending: false, creatingFolder: false, repromptBusy: false,
-    sendBusy: false, sshTotalPendingCount: 0, isSyncing: false,
+    sendBusy: false, sshTotalPendingCount: 0, sshGrants: [], isSyncing: false,
     autoLockMinutes: 15, autoLockArmedAt: 1000000, suspendLockPending: false, syncReloadPending: false,
     autoSyncReloadPending: false, backgroundSync: false,
     autoSyncError: "Automatic sync failed. The local vault may be out of date.",
@@ -115,6 +115,25 @@ for (const proc of ["listProc", "listOrgsProc", "listFoldersProc", "createItemPr
   eq("an SSH request arriving during the sync defers the list reload", c.loadCalls.length, 0)
   c.sshTotalPendingCount = 0; c.maybeAutoSync()
   eq("the reload runs once the request is answered", c.loadCalls.length, 1)
+}
+{
+  // A key load ends every grant, an until-screen-lock one included.
+  const untilLock = Model.sshAgentGrantViews([{ grantId: 1, untilScreenLock: true }], 1000)
+  const timed = Model.sshAgentGrantViews([{ grantId: 2, expiresInSec: 60 }], 1000)
+  const c = fixture(); c.autoLockMinutes = 0; c.sshGrants = untilLock; c.maybeAutoSync()
+  eq("hold automatic sync while an until-screen-lock grant is live", c.syncProc.running, false)
+  c.now += 60 * 60 * 1000; c.maybeAutoSync()
+  eq("and keep holding however long it lasts", c.syncProc.running, false)
+  c.sshGrants = []; c.maybeAutoSync()
+  eq("resume once the grant ends", c.syncProc.running, true)
+  c.sshGrants = untilLock; c.finish(0)
+  eq("a grant made during the sync defers the list reload", c.loadCalls.length, 0)
+  c.sshGrants = []; c.maybeAutoSync()
+  eq("the reload runs once the grant ends", c.loadCalls.length, 1)
+  const t = fixture(); t.sshGrants = timed; t.maybeAutoSync()
+  eq("a timed grant does not hold automatic sync", t.syncProc.running, true)
+  const m = fixture(); m.sshGrants = untilLock; m.syncVault()
+  eq("a manual sync still runs during an until-screen-lock grant", m.syncProc.running, true)
 }
 {
   const c = fixture(); c.maybeAutoSync()

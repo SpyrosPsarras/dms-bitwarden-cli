@@ -6806,6 +6806,10 @@ function sshAgentGrantsAt(views, nowMs) {
   return out
 }
 
+function sshUntilLockGrantLive(grants) {
+  return Array.isArray(grants) && grants.some(function(grant) { return Boolean(grant) && grant.untilScreenLock === true })
+}
+
 // Shown while an SSH request waits on the (slow, full-vault) read an unlock
 // runs; bw cannot read only SSH items.
 function sshAgentLoadingNote() {
