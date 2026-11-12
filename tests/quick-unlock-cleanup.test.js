@@ -45,7 +45,7 @@ function vault() {
     quickUnlockEnableGraceMs: 60000, reconciledMethods: {},
     quickUnlockPurgeAttempts: {}, quickUnlockPurgePending: {}, quickUnlockPurgeMaxAttempts: 3,
     quickUnlockPurgeFailures: {}, errorMessage: "",
-    autoSyncError: /readonly property string autoSyncError: "([^"]+)"/.exec(service)[1],
+    autoSyncError: /readonly property string autoSyncError: Tr\.text\("([^"]+)"\)/.exec(service)[1],
     lastSyncAttemptAt: 0, backgroundSync: false, autoSyncReloadPending: false,
     quickUnlockMethodGeneration: {}, quickUnlockAccountGeneration: {}, pendingPurges: [],
     settings: { pinUnlock: false, fingerprintUnlock: true, fidoUnlock: true },

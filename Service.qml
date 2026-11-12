@@ -760,7 +760,7 @@ Item {
   property double lastSyncAttemptAt: 0
   property bool backgroundSync: false
   property bool autoSyncReloadPending: false
-  readonly property string autoSyncError: "Automatic sync failed. The local vault may be out of date."
+  readonly property string autoSyncError: Tr.text("Automatic sync failed. The local vault may be out of date.")
   property string errorMessage: ""
   // Why a lock happened without the user asking. Outlives the SSH popup's
   // cleanup, which would otherwise wipe it when a request from before the

@@ -576,6 +576,26 @@
     "Generator": "Generator",
     "Accounts": "Konten",
     "Search vault...": "Tresor durchsuchen...",
-    "Copies and safely clears clipboard values using wl-copy and wl-paste.": "Kopiert und löscht Zwischenablagewerte sicher mit wl-copy und wl-paste."
+    "Copies and safely clears clipboard values using wl-copy and wl-paste.": "Kopiert und löscht Zwischenablagewerte sicher mit wl-copy und wl-paste.",
+    "AUTO-TYPE KEY": "AUTO-TYPE-TASTE",
+    "Register Keybinding": "Tastenkürzel eintragen",
+    "Add this key to %1 and reload Hyprland": "Diese Taste in %1 eintragen und Hyprland neu laden",
+    "Copy Line": "Zeile kopieren",
+    "Type a valid key combination first": "Gib zuerst eine gültige Tastenkombination ein",
+    "Remove Keybinding": "Tastenkürzel entfernen",
+    "Delete the lines this plugin added to %1": "Die Zeilen löschen, die dieses Plugin in %1 eingetragen hat",
+    "Copy password and arm auto-type (Ctrl+C)": "Passwort kopieren und Auto-Type vorbereiten (Strg+C)",
+    "Answer pacman in the installer -- this screen updates itself": "Beantworte die Frage von pacman im Installationsfenster – diese Ansicht aktualisiert sich automatisch",
+    "Fingerprint unlock forgotten; the stored password was deleted, so set up PIN or security-key unlock again": "Gespeicherter Fingerabdruck-Zugriff entfernt; das gespeicherte Passwort wurde gelöscht, richte PIN- oder Sicherheitsschlüssel-Entsperrung neu ein",
+    "A verified fingerprint opens your master password, stored once, encrypted and sealed to this machine. Turning this off deletes the stored password, so PIN and security-key unlock need setting up again.": "Ein bestätigter Fingerabdruck öffnet dein verschlüsselt gespeichertes und an diesen Rechner gebundenes Master-Passwort. Beim Ausschalten wird das gespeicherte Passwort gelöscht, PIN- und Sicherheitsschlüssel-Entsperrung musst du dann neu einrichten.",
+    "Type secrets in a separate prompt": "Geheimnisse in einer eigenen Eingabe eintippen",
+    "Type your master password and PIN into the plugin's own unlock prompt, a card over the focused monitor in the DMS theme, instead of the panel, so they never enter the shell. It is a separate, short-lived process under the vault helper and needs quickshell, node and a Wayland display; while the helper is not running, the panel waits for it instead of offering its own field.": "Master-Passwort und PIN in die eigene Entsperr-Eingabe des Plugins statt ins Panel eintippen, eine Karte im DMS-Design über dem fokussierten Monitor, damit sie nicht in die Shell gelangen. Sie ist ein eigener, kurzlebiger Prozess unter dem Vault-Helfer und benötigt quickshell, node und eine Wayland-Anzeige. Solange der Helfer nicht läuft, wartet das Panel und bietet kein eigenes Eingabefeld an.",
+    "Automatically sync every": "Automatisch synchronisieren alle",
+    "Sync while the vault is unlocked and idle. If the server is offline, retry at this interval.": "Synchronisiert, solange der Tresor entsperrt und untätig ist. Ist der Server nicht erreichbar, wird es in diesem Abstand erneut versucht.",
+    "Automatic sync failed. The local vault may be out of date.": "Automatische Synchronisierung fehlgeschlagen. Der lokale Tresor ist möglicherweise veraltet.",
+    "Auto-type logins": "Anmeldungen automatisch eintippen",
+    "Off by default: whatever window has focus when it types gets your password, and while an entry is armed any program running as you can make it type. With it on, Ctrl+C in the panel copies the highlighted login's password and arms it for 30 seconds; the autoType command, bound to a key, then types its username, Tab and password into the focused window, once. Needs wtype.": "Standardmäßig aus: Das Fenster, das beim Tippen den Fokus hat, bekommt dein Passwort, und solange ein Eintrag vorbereitet ist, kann jedes Programm, das unter deinem Benutzer läuft, das Tippen auslösen. Eingeschaltet kopiert Strg+C im Panel das Passwort der markierten Anmeldung und bereitet sie für 30 Sekunden vor; der autoType-Befehl, auf eine Taste gelegt, tippt dann einmal Benutzername, Tab und Passwort ins fokussierte Fenster. Benötigt wtype.",
+    "Auto-type types your password into whatever window has focus, and any program running as you can trigger it while an entry is armed. Press again to turn it on.": "Auto-Type tippt dein Passwort in das Fenster, das gerade den Fokus hat, und solange ein Eintrag vorbereitet ist, kann jedes Programm unter deinem Benutzer es auslösen. Zum Einschalten noch einmal drücken.",
+    "The quick-unlock tool uses a different command interface than this plugin. Rebuild with `scripts/build-helpers.sh`.": "Das Werkzeug zum schnellen Entsperren verwendet eine andere Befehlsschnittstelle als dieses Plugin. Baue es mit `scripts/build-helpers.sh` neu."
   }
 }
