@@ -2467,6 +2467,7 @@ Item {
     root.sshAgentVersion = step.state.agentVersion
     root.sshAgentErrorCode = step.state.errorCode
     root.sshAgentErrorMessage = step.state.errorMessage
+    if (step.state.phase !== "ready" && root.sshGrantsAnnounced.length > 0) root.sshGrantsAnnounced = []
 
     // State is committed first: stopping the Process can re-enter with the
     // exit before this returns, and must see the new phase.

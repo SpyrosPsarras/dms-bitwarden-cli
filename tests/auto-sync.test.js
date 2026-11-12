@@ -136,6 +136,34 @@ for (const proc of ["listProc", "listOrgsProc", "listFoldersProc", "createItemPr
   eq("a manual sync still runs during an until-screen-lock grant", m.syncProc.running, true)
 }
 {
+  // A restarted agent starts with no grants and reports only on change.
+  const agent = () => {
+    const c = fixture(); c.autoLockMinutes = 0; c.root = c
+    Object.assign(c, { sshAgentState: Model.sshAgentInitialState(), sshAgentPhase: "disabled",
+      sshAgentRuntimeDir: "", sshGrantsAnnounced: [], sshGrantTick: 0,
+      sshAgentProc: { running: false }, sshAgentLockProbeProc: { running: false },
+      sshAgentRestartTimer: { stop() {}, restart() {} },
+      startSshAgentHelper() {}, stopSshAgentHelper() {} })
+    Object.defineProperty(c, "sshGrants", { get: () => Model.sshAgentGrantsAt(c.sshGrantsAnnounced, c.sshGrantTick) })
+    vm.runInContext(["applySshAgentEvent", "onSshAgentHelperExited", "onSshAgentMessage"]
+      .map(n => functionBody(source, n)).join("\n"), c)
+    const line = message => c.applySshAgentEvent({ kind: "line", line: JSON.stringify(Object.assign({ v: 2 }, message)), nowMs: c.now })
+    c.applySshAgentEvent({ kind: "enabled", value: true })
+    c.applySshAgentEvent({ kind: "started" })
+    line({ type: "ready", socketPath: "/s", fifoPath: "/f", agentVersion: "1" })
+    line({ type: "grants_changed", grants: [{ grantId: 1, untilScreenLock: true }] })
+    c.maybeAutoSync()
+    return c
+  }
+  const crashed = agent()
+  eq("the agent's until-screen-lock grant holds automatic sync", crashed.syncProc.running, false)
+  crashed.onSshAgentHelperExited(1); crashed.maybeAutoSync()
+  eq("an agent that exits releases the hold", crashed.syncProc.running, true)
+  const disabled = agent()
+  disabled.applySshAgentEvent({ kind: "enabled", value: false }); disabled.maybeAutoSync()
+  eq("turning the agent off releases the hold", disabled.syncProc.running, true)
+}
+{
   const c = fixture(); c.maybeAutoSync()
   eq("first unlocked idle tick starts sync", c.syncProc.running, true)
   eq("background sync leaves the filter drawer alone", c.closedFilters, 0)
