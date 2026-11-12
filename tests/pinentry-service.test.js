@@ -13,8 +13,8 @@ const service = read("Service.qml")
 const body = name => functionBody(service, name)
 const { check, eq, done } = createSuite("pinentry-service")
 
-const names = ["requestPinentry", "onPinentryExited", "beginPinentry", "endPinentry", "cancelPinentry",
-  "resumeFromPinentry", "unlockWithPinentry", "unlockPinWithPinentry", "retryPinentryPin", "releaseHeldPin",
+const names = ["requestPinentry", "onPinentryExited", "beginPinentry", "hideForPinentry", "endPinentry", "cancelPinentry",
+  "resumeFromPinentry", "panelShown", "unlockWithPinentry", "unlockPinWithPinentry", "retryPinentryPin", "releaseHeldPin",
   "submitRepromptWithPinentry", "submitReprompt", "forgetHeldPassword", "forgetHeldAfter", "onUnlockOutput",
   "declinePinentry", "resetPinentryChoice"]
 
@@ -27,7 +27,7 @@ function makeVault(extra) {
     get typedSecretEntry() { return Model.typedSecretEntry({ usePinentry: this.usePinentry,
       missing: this.pinentryMissing, declined: this.pinentryDeclined, helperState: this.vaultHelperState }) },
     get pinentryAvailable() { return this.typedSecretEntry === "pinentry" },
-    pinentryProgramName: "pinentry", userEmail: "me@example.com",
+    omarchyPinentryPath: "/plugin/pinentry/omarchy-pinentry", userEmail: "me@example.com",
     pinentryActive: false, pinentryRun: null, pinentryView: null, pinentryWasOpen: false, pinentryReturning: false,
     pinentryMasterName: "", pinentryNotice: "", heldPinName: "",
     status: "locked", errorMessage: "", isUnlocking: false, masterPassword: "", pinEntry: "", pinUnlockError: "",
@@ -37,7 +37,7 @@ function makeVault(extra) {
     repromptPending: false, repromptBusy: false, repromptError: "", repromptItemId: "", repromptEpoch: 1,
     vaultEpoch: 1, repromptCallback: null, repromptVerifiedId: "", repromptActionId: "", detailItem: null,
     opened: true, seq: 0, forgotten: [], unlocks: [], pinSubmits: [], shows: 0, verifies: [],
-    proc: { running: false, runId: 0, command: null, capture: "", starts: [] },
+    proc: { running: false, runId: 0, command: null, environment: {}, capture: "", starts: [] },
     newHeldName() { this.seq += 1; return "pw" + this.seq },
     forgetVaultSecret(name) { this.forgotten.push(name) },
     restoreScreenFocus() { this.restored += 1 },
@@ -46,9 +46,12 @@ function makeVault(extra) {
     submitTakesIt: true,
     verifyMasterPassword(pw, cb) { this.verifies.push(pw); this.verifyDone = cb },
     prepareUnlock() {}, clearRepromptGrant() {},
+    // The startup work of a fresh open (Service.qml's own is not run here).
+    panelOpens: 0, onPanelOpened() { this.panelOpens += 1 },
     view: null,
     eachView(fn) { fn(this.view) },
-    get presenter() { return this.view }
+    get presenter() { return this.view },
+    get views() { return this.view ? [this.view] : [] }
   }
   Object.defineProperty(v, "pinentryProc", { get() { return this.proc } })
   v.view = { hidePopout() { v.opened = false }, showPopout() { v.opened = true; v.shows += 1 } }
@@ -73,15 +76,18 @@ function finish(v, code, held, stderr) {
   // `proc.running = true` is the start: record the command it was given.
   Object.defineProperty(v.proc, "running", {
     configurable: true, get() { return this._r === true },
-    set(value) { if (value) this.starts.push({ command: this.command, capture: this.capture }); this._r = value }
+    set(value) { if (value) this.starts.push({ command: this.command, environment: this.environment, capture: this.capture }); this._r = value }
   })
   v.unlockWithPinentry()
   const run = v.proc.starts[0]
   check("an unlock starts a pinentry run that the helper holds", run && /^pinentry:pw\d+$/.test(run.capture), JSON.stringify(run))
   check("the run is the pinentry script, asking for the account's master password",
-    run && run.command[1] === Model.pinentryCommand("pinentry", {})[1] && run.command[4] === "pinentry"
-      && /me@example\.com/.test(run.command[6]) && run.command[7] === "Master password:" && run.command[8] === "",
+    run && run.command[2] === Model.pinentryCommand("/x", {})[2] && run.command[4] === "/plugin/pinentry/omarchy-pinentry"
+      && /me@example\.com/.test(run.environment.QSBW_PE_DESC) && run.command[6] === "Master password:"
+      && run.environment.QSBW_PE_ERR === "" && run.command[7] === "0",
     JSON.stringify(run && run.command.slice(3)))
+  check("the account is not in the argv, only in the environment",
+    !JSON.stringify(run.command).includes("me@example.com"), JSON.stringify(run.command.slice(3)))
   check("the panel is hidden meanwhile and the unlock is not yet started",
     v.pinentryActive && !v.opened && v.unlocks.length === 0, "")
   const name = run.capture.slice("pinentry:".length)
@@ -100,7 +106,7 @@ function finish(v, code, held, stderr) {
   v.onUnlockOutput("", "Invalid master password.", 1)
   check("a refused password is forgotten", v.forgotten.includes(name) && v.pendingUnlockPassword === "", v.forgotten.join())
   check("and pinentry asks again with an error, in a new run",
-    v.proc.starts.length === 1 && v.proc.starts[0].command[8] === "That is not your master password."
+    v.proc.starts.length === 1 && v.proc.starts[0].environment.QSBW_PE_ERR === "That is not your master password."
       && v.proc.starts[0].capture !== run.capture, JSON.stringify(v.proc.starts))
   check("no error is shown in the panel for it", v.errorMessage === "" || /not logged in/.test(v.errorMessage), v.errorMessage)
 
@@ -113,6 +119,128 @@ function finish(v, code, held, stderr) {
       && v.pinentryNotice === "", "")
 }
 
+// --- the panel opening while pinentry asks (#132) -----------------------------------------
+
+// Views that behave as Panel.qml's do: showing one flips `opened`, which runs
+// onOpenedChanged (panelShown()); `askOnShow` has the unlock form ask
+// pinentry inside show(), before `opened` reads true, as a real popout does.
+function withViews(v, count) {
+  const views = []
+  for (let i = 0; i < count; i++) {
+    const view = {
+      opened: false, shows: 0, hides: 0, askOnShow: false,
+      showPopout() {
+        if (this.askOnShow) { this.askOnShow = false; v.unlockWithPinentry() }
+        if (this.opened) return
+        this.opened = true; this.shows += 1; v.panelShown()
+      },
+      hidePopout() { this.hides += 1; this.opened = false }
+    }
+    views.push(view)
+  }
+  Object.defineProperty(v, "opened", { configurable: true, get() { return views.some(view => view.opened) } })
+  Object.defineProperty(v, "views", { configurable: true, get() { return views } })
+  v.eachView = fn => views.slice().forEach(fn)
+  Object.defineProperty(v, "presenter", { configurable: true, get() { return views.find(view => view.opened) || views[0] } })
+  Object.defineProperty(v.proc, "running", { configurable: true, get() { return this._r === true }, set(x) { this._r = x } })
+  return views
+}
+
+{
+  // Opened with the vault locked: the form asks pinentry as the popout shows.
+  const v = makeVault()
+  const [view] = withViews(v, 1)
+  view.askOnShow = true
+  view.showPopout()
+  check("pinentry asked while the panel was still opening: the panel opens, then is hidden for it",
+    v.pinentryActive && view.shows === 1 && !v.opened && view.hides === 1, JSON.stringify(view))
+  check("that open still did its startup work, once", v.panelOpens === 1, String(v.panelOpens))
+  check("and the view is remembered to come back", v.pinentryWasOpen && v.pinentryView === view, "")
+  finish(v, 1, false)
+  check("the answer (a cancel here) shows it again, as a resume",
+    v.opened && view.shows === 2 && !v.pinentryActive && v.panelOpens === 1 && v.restored === 1 && !v.pinentryReturning,
+    JSON.stringify({ shows: view.shows, opens: v.panelOpens, restored: v.restored }))
+
+  // The same open answered with the password: the unlock goes ahead and the
+  // panel comes back for it.
+  const w = makeVault()
+  const [wv] = withViews(w, 1)
+  wv.askOnShow = true
+  wv.showPopout()
+  const name = w.pinentryRun.name
+  finish(w, 0, true)
+  check("answered, the held name goes to the unlock and the panel is back",
+    w.unlocks.join() === Model.heldSecretRef(name) && w.opened && wv.shows === 2 && w.panelOpens === 1, w.unlocks.join())
+}
+
+{
+  // A second monitor's view opens underneath: every view is hidden, and the
+  // one that opened is the one shown again.
+  const v = makeVault()
+  const [a, b] = withViews(v, 2)
+  v.unlockWithPinentry()
+  check("asked with every panel closed, nothing is hidden or remembered",
+    v.pinentryActive && !v.pinentryWasOpen && v.pinentryView === null && a.hides === 0 && b.hides === 0, "")
+  b.showPopout()
+  check("the view that opened underneath is hidden, and every other one with it",
+    !v.opened && a.hides === 1 && b.hides === 1 && v.pinentryView === b, "")
+  finish(v, 1, false)
+  check("and that view alone comes back", b.opened && !a.opened && b.shows === 2 && a.shows === 0, "")
+}
+
+{
+  // The view that opened underneath is detached before the answer (its
+  // monitor unplugged): it may be destroyed, so another view shows instead.
+  const v = makeVault()
+  const views = withViews(v, 2)
+  const [a, b] = views
+  v.unlockWithPinentry()
+  b.showPopout()
+  views.splice(views.indexOf(b), 1)
+  finish(v, 1, false)
+  check("a remembered view since detached is not touched; the presenter comes back instead",
+    a.opened && a.shows === 1 && b.shows === 1 && v.restored === 1 && !v.pinentryReturning, JSON.stringify({ a, b }))
+  // The only view gone: nothing to show, and no resume left waiting.
+  const w = makeVault()
+  const only = withViews(w, 1)
+  w.unlockWithPinentry()
+  only[0].showPopout()
+  const gone = only.splice(0, 1)[0]
+  finish(w, 1, false)
+  check("with no view left nothing is shown and no resume is owed",
+    !w.pinentryActive && !w.pinentryReturning && gone.shows === 1 && w.pinentryView === null, JSON.stringify(gone))
+}
+
+{
+  // Asked with the panel closed (the SSH approval popup's unlock), never
+  // opened meanwhile: nothing is shown after the answer.
+  const v = makeVault()
+  const [view] = withViews(v, 1)
+  v.unlockWithPinentry()
+  const name = v.pinentryRun.name
+  finish(v, 0, true)
+  check("a panel closed when pinentry asked, and never opened, stays closed",
+    !v.opened && view.shows === 0 && view.hides === 0 && !v.pinentryReturning && v.pinentryView === null
+      && v.unlocks.join() === Model.heldSecretRef(name), JSON.stringify(view))
+  v.unlockWithPinentry()
+  finish(v, 1, false)
+  check("nor after a cancel", !v.opened && view.shows === 0 && !v.pinentryReturning, "")
+}
+
+{
+  // The panel already open when pinentry asks: hidden at once, as before.
+  const v = makeVault()
+  const [view] = withViews(v, 1)
+  view.showPopout()
+  v.unlockWithPinentry()
+  check("an open panel is hidden as pinentry asks", !v.opened && view.hides === 1 && v.pinentryView === view, "")
+  // A later show of the same open does not hide it twice or lose the view.
+  v.hideForPinentry()
+  check("hiding again is a no-op", view.hides === 1 && v.pinentryView === view, "")
+  finish(v, 1, false)
+  check("and is shown again after", v.opened && view.shows === 2 && v.panelOpens === 1 && v.restored === 1, "")
+}
+
 // --- when pinentry cannot be used ---------------------------------------------------------
 
 {
@@ -123,7 +251,7 @@ function finish(v, code, held, stderr) {
   check("without the vault helper nothing is run and nothing changes", !started && !v.pinentryActive && v.opened
     && v.unlocks.length === 0, "")
   check("it is not available then", v.pinentryAvailable === false, "")
-  check("nor when turned off or not installed",
+  check("nor when turned off or unable to run here",
     makeVault({ usePinentry: false }).pinentryAvailable === false && makeVault({ pinentryMissing: true }).pinentryAvailable === false, "")
 }
 
@@ -207,7 +335,7 @@ function finish(v, code, held, stderr) {
   g.onUnlockOutput("", "ERROR bitwarden_core::x: noise\nThe vault is broken.", 1)
   eq("another failure is shown without the log lines", g.errorMessage, "The vault is broken.")
   check("bw 2026.2's wrong password reopens pinentry with the reason",
-    w.pinentryActive && /That is not your master password\./.test(w.proc.command[8]), JSON.stringify(w.proc.command && w.proc.command[8]))
+    w.pinentryActive && /That is not your master password\./.test(w.proc.environment.QSBW_PE_ERR), JSON.stringify(w.proc.command && w.proc.environment.QSBW_PE_ERR))
 }
 
 // --- a run in the way, and being cancelled --------------------------------------------------
@@ -275,7 +403,7 @@ function finish(v, code, held, stderr) {
   Object.defineProperty(v.proc, "running", { configurable: true, get() { return this._r === true }, set(x) { this._r = x } })
   v.unlockPinWithPinentry()
   check("the PIN is asked for by pinentry, with the PIN prompt",
-    v.proc.command[7] === "PIN:" && /PIN/.test(v.proc.command[6]) && /^pinentry:pw\d+$/.test(v.proc.capture), JSON.stringify(v.proc.command.slice(5)))
+    v.proc.command[6] === "PIN:" && /PIN/.test(v.proc.environment.QSBW_PE_DESC) && /^pinentry:pw\d+$/.test(v.proc.capture), JSON.stringify(v.proc.command.slice(5)))
   const name = v.proc.capture.slice("pinentry:".length)
   finish(v, 0, true)
   eq("the PIN's name goes to the PIN unlock", v.pinSubmits.join(), Model.heldSecretRef(name))
@@ -286,21 +414,21 @@ function finish(v, code, held, stderr) {
   // and no attempt counted.
   const s = makeVault({ pinAttempts: 0, wrong: 0, countWrongPin() { this.wrong += 1 } })
   Object.defineProperty(s.proc, "running", { configurable: true, get() { return this._r === true }, set(x) {
-    if (x) s.proc.starts.push({ command: s.proc.command, capture: s.proc.capture }); this._r = x } })
+    if (x) s.proc.starts.push({ command: s.proc.command, environment: s.proc.environment, capture: s.proc.capture }); this._r = x } })
   s.unlockPinWithPinentry()
-  check("the PIN run carries the unlock minimum", s.proc.starts[0].command[9] === String(Model.pinUnlockMinLength()),
+  check("the PIN run carries the unlock minimum", s.proc.starts[0].command[7] === String(Model.pinUnlockMinLength()),
     JSON.stringify(s.proc.starts[0].command.slice(5)))
   finish(s, Model.pinentryExitCodes().short, false)
   check("a short PIN is not submitted and not counted",
     s.pinSubmits.length === 0 && s.wrong === 0 && s.pinAttempts === 0, "")
   check("it asks again with the field's message",
     s.proc.starts.length === 2 && s.pinUnlockError === "PIN must be at least " + Model.pinUnlockMinLength() + " digits"
-      && s.proc.starts[1].command[8] === s.pinUnlockError, JSON.stringify(s.proc.starts[1]))
+      && s.proc.starts[1].environment.QSBW_PE_ERR === s.pinUnlockError, JSON.stringify(s.proc.starts[1]))
   check("a master password run has no minimum", makeVault().proc && (() => {
     const m = makeVault()
     Object.defineProperty(m.proc, "running", { configurable: true, get() { return false }, set() {} })
     m.unlockWithPinentry()
-    return m.proc.command[9] === "0"
+    return m.proc.command[7] === "0"
   })(), "")
 
   // The unlock was not taken up: nothing else would forget it.
@@ -325,13 +453,13 @@ function finish(v, code, held, stderr) {
   v.submitRepromptWithPinentry()
   const first = v.proc.capture.slice("pinentry:".length)
   check("the confirmation runs pinentry for the master password",
-    /^pinentry:pw\d+$/.test(v.proc.capture) && /master password/i.test(v.proc.command[6]) && v.repromptBusy, JSON.stringify(v.proc.command.slice(5)))
+    /^pinentry:pw\d+$/.test(v.proc.capture) && /master password/i.test(v.proc.environment.QSBW_PE_DESC) && v.repromptBusy, JSON.stringify(v.proc.command.slice(5)))
   finish(v, 0, true)
   eq("the held name is what is verified", v.verifies.join(), Model.heldSecretRef(first))
   v.proc.capture = ""
   v.verifyDone(false)
   check("a wrong password is forgotten and pinentry asks again with the reason",
-    v.forgotten.includes(first) && /^pinentry:/.test(v.proc.capture) && v.proc.command[8] === "That is not your master password."
+    v.forgotten.includes(first) && /^pinentry:/.test(v.proc.capture) && v.proc.environment.QSBW_PE_ERR === "That is not your master password."
       && !acted, v.proc.capture)
   const second = v.proc.capture.slice("pinentry:".length)
   finish(v, 0, true)
@@ -359,7 +487,8 @@ check("no pinentry flow writes what was typed into the shell's fields",
   !/\b(masterPassword|pinEntry|loginPassword|pinSetupMaster|fpSetupMaster)\s*=[^=]/.test(flows), flows)
 check("the run asks the helper to hold the answer",
   /pinentryProc\.capture = "pinentry:" \+ name/.test(body("requestPinentry"))
-    && /Model\.pinentryCommand\(pinentryProgramName/.test(body("requestPinentry")), body("requestPinentry"))
+    && /Model\.pinentryCommand\(omarchyPinentryPath, ask\)/.test(body("requestPinentry"))
+    && /pinentryProc\.environment = Model\.pinentryEnvironment\(/.test(body("requestPinentry")), body("requestPinentry"))
 check("the process is a VaultProcess with no session and no output collector",
   /VaultProcess \{\s*id: pinentryProc\s*vault: root\s*session: false\s*stderr: VaultCollector[^\n]*\n\s*onExited/.test(service)
     && !/id: pinentryProc[\s\S]{0,200}stdout:/.test(service), "")
@@ -384,7 +513,11 @@ check("a lock, another method's unlock and the panel being asked for end a pinen
   /cancelPinentry\(\)/.test(body("dropVaultState")) && /cancelPinentry\(\)/.test(body("onUnlockSuccess"))
     && /cancelPinentry\(\)/.test(body("open")), "")
 check("hiding the panel for pinentry is not a close; coming back is a resume",
-  /else if \(!pinentryActive\) \{\s*pinentryAutoAsked = false\s*clearRepromptGrant\(\)\s*resetPinentryChoice\(\)/.test(service) && /!resumeFromPinentry\(\)/.test(service), "")
+  /else if \(!pinentryActive\) \{\s*pinentryAutoAsked = false\s*clearRepromptGrant\(\)\s*resetPinentryChoice\(\)/.test(service) && /!resumeFromPinentry\(\)/.test(body("panelShown")), "")
+check("every show of the panel goes through panelShown(), which hides it again while pinentry asks (#132)",
+  /onOpenedChanged: \{\s*if \(opened\) \{\s*panelShown\(\)\s*\} else if/.test(service)
+    && /if \(pinentryActive\) Qt\.callLater\(hideForPinentry\)/.test(body("panelShown"))
+    && /hideForPinentry\(\)/.test(body("beginPinentry")) && !/hidePopout/.test(body("beginPinentry")), body("panelShown"))
 check("the field picked after a failure lasts until the panel closes or the vault locks or unlocks",
   /resetPinentryChoice\(\)/.test(body("dropVaultState")) && /resetPinentryChoice\(\)/.test(body("onUnlockSuccess")), "")
 check("a pinentry run never runs in the shell: without the helper it is refused",
@@ -442,8 +575,25 @@ check("the re-prompt question asks pinentry when it can, and shows its field onl
 
 // --- settings -----------------------------------------------------------------------------------------
 
-check("the setting defaults on and an override program is read from shell.json",
+check("the setting defaults on",
   Model.boolSetting("usePinentry", undefined) === true && Model.boolSetting("usePinentry", false) === false
-    && /Model\.pinentryProgram\(setting\("pinentryProgram", ""\)\)/.test(service), "")
+    && /usePinentry: Model\.boolSetting\("usePinentry", setting\("usePinentry", true\)\)/.test(service), "")
+check("the plugin's own pinentry is the only one, found from the plugin's own directory",
+  /omarchyPinentryPath: Model\.omarchyPinentryPath\(sshAgentPluginDir\)/.test(service)
+    && Model.omarchyPinentryPath("/p") === "/p/pinentry/omarchy-pinentry", "")
+check("no program override and no on/off for it is read from shell.json, so a stale one is ignored",
+  !/setting\("pinentryProgram"|setting\("omarchyPinentry"|pinentryProgramName|case "omarchyPinentry"/.test(service), "")
+check("every pinentry run and probe is given it",
+  /Model\.pinentryCommand\(omarchyPinentryPath, ask\)/.test(body("requestPinentry"))
+    && /Model\.pinentryProbeCommand\(omarchyPinentryPath\)/.test(functionBody(service, "probePinentry")), "")
+check("a plugin moved to another directory checks again whether the prompt can run",
+  /onOmarchyPinentryPathChanged: \{\s*resetPinentryChoice\(\)\s*probePinentry\(\)/.test(service), "")
+{
+  const v = makeVault({ pinentryMissing: true })
+  v.resetPinentryChoice()
+  check("a prompt that cannot run here says so, and what typing in the panel costs",
+    v.pinentryNotice === Model.pinentryMissingNotice() && /cannot open here/.test(v.pinentryNotice)
+      && /stays in the shell's memory/.test(v.pinentryNotice) && !/install|pinentry-qt/i.test(v.pinentryNotice), v.pinentryNotice)
+}
 
 done()

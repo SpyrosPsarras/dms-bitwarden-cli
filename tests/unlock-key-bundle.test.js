@@ -39,3 +39,8 @@ for (const [spec, parse] of [[Model.UNLOCK_KEY_SPEC, Model.parseUnlockKeyInspect
   } finally {fs.rmSync(dir,{recursive:true,force:true});}
  });
 }
+// v2 reads the account from QSBW_ACCOUNT_ID / QSBW_SERVER, not --account-id / --server.
+test('the panel refuses an unlock tool with another command interface', () => {
+ assert.equal(Model.UNLOCK_KEY_CLI_VERSION,2);
+ assert.equal(Model.parseUnlockKeyInspection('state=ok\nsource=development\nversion=0.2.0\nprotocol=1\n').state,'protocol-mismatch');
+});

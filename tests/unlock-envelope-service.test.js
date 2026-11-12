@@ -161,9 +161,12 @@ check("envelope jobs run one at a time",
   /if \(envelopeProc\.running \|\| envelopeJob !== null \|\| envelopeJobs\.length === 0\) return/
     .test(bodyOf("pumpEnvelopeJobs")), bodyOf("pumpEnvelopeJobs"))
 check("a job's secrets are dropped the moment it starts",
-  /envelopeProc\.environment = job\.env \|\| \{\}\s*\n\s*job\.env = null/.test(bodyOf("pumpEnvelopeJobs"))
+  /envelopeProc\.environment = Object\.assign\(\{\}, job\.accountEnv \|\| \{\}, job\.env \|\| \{\}\)\s*\n\s*job\.env = null/.test(bodyOf("pumpEnvelopeJobs"))
     && /envelopeProc\.environment = \{\}/.test(bodyOf("onEnvelopeJobExited")),
   bodyOf("pumpEnvelopeJobs"))
+check("every job carries the account in its environment, not its argv",
+  /job\.accountEnv = Model\.envelopeAccountEnv\(envelopeAccount\(\)\)/.test(bodyOf("queueEnvelopeJob")),
+  bodyOf("queueEnvelopeJob"))
 check("a job that printed the password has its collector scrubbed",
   /job\.secretOutput\) clearProcessCollectorSoon\(envelopeProc\)/.test(bodyOf("onEnvelopeJobExited")),
   bodyOf("onEnvelopeJobExited"))
@@ -186,9 +189,17 @@ check("the account comes from bw status",
 check("argon2 and systemd-creds are probed at start",
   /root\.inspectQuickUnlockPrereqs\(\)/.test(service)
     && /quickUnlockAvailable: unlockKeyReady && quickUnlockPrereqs\.ready/.test(service), "")
-check("forgetting fingerprint removes its wrap as well as any legacy entry",
-  /requestMasterCredentialClear\(\)[\s\S]{0,200}?removeQuickUnlockMethod\(\{ kind: "remove", method: "fingerprint" \}\)/
-    .test(bodyOf("forgetFingerprintUnlock")), bodyOf("forgetFingerprintUnlock"))
+check("forgetting fingerprint deletes the envelope, whose key its wrap exposed, as well as any legacy entry",
+  /requestMasterCredentialClear\(\)[\s\S]{0,300}?envelopeSummary\.fingerprint\) \{\s*removeQuickUnlockMethod\(\{ kind: "delete" \}\)/
+    .test(bodyOf("forgetFingerprintUnlock")) && !/method: "fingerprint"/.test(bodyOf("forgetFingerprintUnlock")),
+  bodyOf("forgetFingerprintUnlock"))
+check("and says so when a PIN or key went with it",
+  /s\.fingerprint && \(s\.pin \|\| \(Array\.isArray\(s\.fido\) && s\.fido\.length > 0\)\)/.test(bodyOf("fingerprintForgottenText"))
+    && /stored password was deleted, so set up PIN or security-key unlock again/.test(bodyOf("fingerprintForgottenText"))
+    && /flashNotification\(notice\)/.test(bodyOf("forgetFingerprintUnlock")), bodyOf("fingerprintForgottenText"))
+check("a wrap from a cancelled setup is still a plain removal",
+  /epochOperationIsStale\("fingerprintAdd"\)[\s\S]{0,300}?removeQuickUnlockMethod\(\{ kind: "remove", method: "fingerprint" \}\)/
+    .test(bodyOf("submitFingerprintSetup")), bodyOf("submitFingerprintSetup"))
 check("settings state the floor rule where it applies",
   /fingerprintUnlock \|\| !fingerprintStored\) return ""[\s\S]{0,200}?only as protected as/
     .test(bodyOf("settingNote"))
@@ -295,6 +306,11 @@ const fidoArmed = fidoSrc.slice(fidoSrc.indexOf("onArmedChanged:"), fidoSrc.inde
 check("turning PIN off purges it from every account", /purgeQuickUnlockMethod\("pin"\)/.test(pinChanged), pinChanged)
 check("turning fingerprint off purges it from every account",
   /purgeQuickUnlockMethod\("fingerprint"\)/.test(fpChanged), fpChanged)
+check("and the notice is settled from the summary before the purge empties it",
+  /var notice = fingerprintForgottenText\(\)[\s\S]{0,200}?purgeQuickUnlockMethod\("fingerprint"\)\s*flashNotification\(notice\)/.test(fpChanged), fpChanged)
+check("the fingerprint purge deletes the envelope instead of storing one without the wrap",
+  /method === "fingerprint"\) \{[\s\S]{0,200}?keyringClearEntryScript\(keyringEntryName\(KEYRING_ENVELOPE, slot\)\) \+ " \|\| exit 1; exit 0; "/
+    .test(read("BitwardenModel.js")), "")
 check("turning FIDO2 off purges it from every account",
   /vault\.purgeQuickUnlockMethod\("fido"\)/.test(fidoArmed), fidoArmed)
 check("the purge names every account slot the panel holds",

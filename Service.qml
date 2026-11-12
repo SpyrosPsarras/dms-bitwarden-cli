@@ -121,6 +121,7 @@ Item {
 
   // Settings, validated on the way in (nothing validates shell.json); see
   // intSetting() in BitwardenModel.js.
+  readonly property int autoSyncMinutes: Model.intSetting("autoSyncMinutes", setting("autoSyncMinutes"))
   readonly property int autoLockMinutes: Model.intSetting("autoLockMinutes", setting("autoLockMinutes"))
   readonly property int clearClipboardSec: Model.intSetting("clearClipboardSec", setting("clearClipboardSec"))
   readonly property bool lockOnScreenLock: Model.boolSetting("lockOnScreenLock", setting("lockOnScreenLock", true))
@@ -128,17 +129,18 @@ Item {
   readonly property bool rememberSession: Model.boolSetting("rememberSession", setting("rememberSession", true))
   readonly property int autoCopyTotpSec: Model.intSetting("autoCopyTotpSec", setting("autoCopyTotpSec"))
   readonly property bool closeOnCopy: Model.boolSetting("closeOnCopy", setting("closeOnCopy", true))
+  readonly property bool autoTypeEnabled: Model.boolSetting("autoTypeEnabled", setting("autoTypeEnabled", false))
   readonly property bool colorizeIcon: Model.boolSetting("colorizeIcon", setting("colorizeIcon", false))
   readonly property bool suggestOnOpen: Model.boolSetting("suggestOnOpen", setting("suggestOnOpen", true))
   readonly property bool fingerprintUnlock: Model.boolSetting("fingerprintUnlock", setting("fingerprintUnlock", false))
   readonly property bool fidoUnlock: Model.boolSetting("fidoUnlock", setting("fidoUnlock", false))
   readonly property bool pinUnlock: Model.boolSetting("pinUnlock", setting("pinUnlock", false))
-  // Type the master password and PIN into pinentry, a separate process,
-  // rather than the panel. `pinentryProgram` (not in the settings screen)
-  // names a different program; unset, "" lets the scripts pick pinentry-qt
-  // when runnable, else `pinentry` from PATH.
+  // Type the master password and PIN into the plugin's own pinentry, a
+  // separate process, rather than the panel. It is the only one: a
+  // `pinentryProgram` or `omarchyPinentry` left in shell.json is ignored.
   readonly property bool usePinentry: Model.boolSetting("usePinentry", setting("usePinentry", true))
-  readonly property string pinentryProgramName: Model.pinentryProgram(setting("pinentryProgram", ""))
+  // pinentry/omarchy-pinentry by absolute path from this file's directory.
+  readonly property string omarchyPinentryPath: Model.omarchyPinentryPath(sshAgentPluginDir)
   // Opt-in: nothing starts, binds or opens a FIFO while false.
   readonly property bool sshAgentEnabled: Model.boolSetting("sshAgentEnabled", setting("sshAgentEnabled", false))
   readonly property bool sshAgentUnlockOnDemand: Model.boolSetting("sshAgentUnlockOnDemand", setting("sshAgentUnlockOnDemand", false))
@@ -643,7 +645,25 @@ Item {
   property bool totpRestartPending: false
   property string totpCopyItemId: ""
   property string passwordCopyItemId: ""
-
+  // The notification for the `bw get password` copy in flight.
+  property string passwordCopyNotice: ""
+  // Auto-type (see "Auto-type" in BitwardenModel.js): the entry armed from
+  // the panel, by id and vault generation only, for one type within
+  // Model.autoTypeArmMs(). A lock, logout or account switch drops it
+  // (dropVaultSecrets()).
+  property string autoTypeItemId: ""
+  property int autoTypeArmEpoch: -1
+  // From a type's start until wtype has finished, or the helper has not
+  // answered in time; `autoTypeSeq` tells a late answer it was given up on.
+  property bool autoTypeBusy: false
+  property int autoTypeSeq: 0
+  // The login a type in flight is for, by id and vault generation: the arm is
+  // used up as the type starts, and a successful one then copies its TOTP code
+  // (finishAutoType()). Dropped with the type (stopAutoType()).
+  property string autoTypeTypedItemId: ""
+  property int autoTypeTypedEpoch: -1
+  // Without the helper: the text, from starting wtype until its stdin has it.
+  property string autoTypePendingText: ""
   // Attachment downloads run one at a time from a queue. `attachmentSaved`
   // maps attachment id to saved path (for Open / Show in folder); cleared when
   // another item opens.
@@ -737,7 +757,15 @@ Item {
   // This session already tried to repair an unsynced vault (onStatusFinished()).
   property bool initialSyncAttempted: false
   property bool syncReloadPending: false
+  property double lastSyncAttemptAt: 0
+  property bool backgroundSync: false
+  property bool autoSyncReloadPending: false
+  readonly property string autoSyncError: "Automatic sync failed. The local vault may be out of date."
   property string errorMessage: ""
+  // Why a lock happened without the user asking. Outlives the SSH popup's
+  // cleanup, which would otherwise wipe it when a request from before the
+  // lock is cancelled afterwards.
+  readonly property string vaultHelperLostMessage: "The vault helper stopped, so the vault was locked. Unlock again."
   property string flashMessage: ""
   property bool cursorActive: false
 
@@ -800,8 +828,16 @@ Item {
   property string sendFormPassword: ""
   property int sendIndex: 0
 
-  // Generator state (session-scoped; the browser extension's options)
+  // Generator state (the browser extension's options). The options are kept
+  // in shell.json (`generatorOptions`), restored on the first visit and saved
+  // a moment after each change, so stepping the length writes once.
   property var genOpts: Model.generatorDefaults()
+  property bool genOptsRestored: false
+  // The options last written (or read), as JSON.
+  property string genOptsSaved: ""
+  property bool genOptsWritePending: false
+  // Failed saves retried since the last change; one is allowed.
+  property int genOptsRetries: 0
   property string genValue: ""
   property bool genBusy: false
   property bool genRegeneratePending: false
@@ -1229,7 +1265,7 @@ Item {
       session = ""
       if (status === "unlocked") {
         lockVault()
-        errorMessage = "The vault helper stopped, so the vault was locked. Unlock again."
+        errorMessage = vaultHelperLostMessage
       } else {
         applySshAgentLifecycle("lock")
         dropVaultState()
@@ -1647,6 +1683,8 @@ Item {
     // Answers for an account no longer active are dropped (onEnvelopeJobExited()).
     job.slot = activeSlot
     job.epoch = vaultEpoch
+    // The tool reads the account from the environment, not argv.
+    job.accountEnv = Model.envelopeAccountEnv(envelopeAccount())
     var jobs = envelopeJobs.slice()
     jobs.push(job)
     envelopeJobs = jobs
@@ -1666,6 +1704,7 @@ Item {
     if (job.unlock && (job.cancelled || job.slot !== activeSlot || job.epoch !== vaultEpoch || logoutPending)) {
       for (var key in job.env) forgetHeldPassword(job.env[key])
       job.env = null
+      if (job.unlock && job.onDropped) job.onDropped(job.cancelled === true)
       pumpEnvelopeJobs()
       return
     }
@@ -1678,7 +1717,7 @@ Item {
     if (job.holdOutput) job.heldName = newHeldName()
     envelopeProc.capture = job.holdOutput ? "secret:" + job.heldName : (job.capture || "plain")
     envelopeProc.inject = job.inject || ({})
-    envelopeProc.environment = job.env || {}
+    envelopeProc.environment = Object.assign({}, job.accountEnv || {}, job.env || {})
     job.env = null
     envelopeProc.running = true
   }
@@ -1698,7 +1737,12 @@ Item {
     var accepting = job && !logoutPending && job.slot === activeSlot
       && (!job.unlock || (!job.cancelled && job.epoch === vaultEpoch))
     if (job && job.onDone && (accepting || job.alwaysDone)) job.onDone(exitCode, out)
-    else if (job && job.holdOutput) forgetHeldPassword(out)
+    else {
+      if (job && job.holdOutput) forgetHeldPassword(out)
+      // An answer nobody takes up must not leave its submit marked busy.
+      if (job && job.unlock && job.onDropped) job.onDropped(job.cancelled === true)
+    }
+    if (job && job.unlock) recheckStatusAfterUnlock()
     out = ""
     if (logoutPending && allCredentialsClearPending) Qt.callLater(requestAllCredentialClear)
     Qt.callLater(pumpEnvelopeJobs)
@@ -1726,6 +1770,9 @@ Item {
     }
     // A queued or exiting legacy PIN run still owns its capture.
     if (!pinUnlockProc.running && pinUnlockProc.runId === 0) pinBusy = false
+    // A status held back for a queued job, or one that never started, has no
+    // exit to trigger the recheck. A running job's exit still does it.
+    if (!(envelopeJob && envelopeJob.unlock)) recheckStatusAfterUnlock()
   }
 
   // Leaving an account or logging out invalidates its cleanup callbacks.
@@ -2102,6 +2149,8 @@ Item {
   // A status probe stopped by a switch; its stale answer restarts the probe.
   property bool statusRefreshPending: false
   property bool statusCheckQueued: false
+  // A `bw status` result was set aside because a quick unlock was running.
+  property bool statusRecheckAfterUnlock: false
   property string pendingAccountsJson: ""
   property bool accountsWritePending: false
   // Slots to sign out of and delete, one process at a time.
@@ -2681,13 +2730,13 @@ Item {
   // Leave no password, PIN, PAM conversation or prewarmed CLI behind a
   // dismissed or expired popup.
   function clearSshPopupUnlockState() {
+    root.pinUnlockSubmitted = false
     cancelEnvelopeUnlockJobs()
     cancelFingerprintUnlock()
     cancelFidoUnlock()
     cancelAuthPrewarm()
     cancelPinentry()
     if (pinUnlockProc.running) pinUnlockProc.running = false
-    root.pinUnlockSubmitted = false
     // running goes false at cancellation; finish releases runId at the exit.
     if (pinUnlockProc.runId === 0) root.pinBusy = false
     root.releaseHeldPin()
@@ -2701,7 +2750,8 @@ Item {
     root.pinUnlockError = ""
     root.fingerprintMessage = ""
     root.fingerprintError = ""
-    root.errorMessage = ""
+    // Not the reason the vault was locked under the popup.
+    if (root.errorMessage !== root.vaultHelperLostMessage) root.errorMessage = ""
     syncLoginFieldsToState()
   }
 
@@ -3432,7 +3482,7 @@ Item {
   // The panel hidden so pinentry can take the keyboard is not a close.
   onOpenedChanged: {
     if (opened) {
-      if (!resumeFromPinentry()) onPanelOpened()
+      panelShown()
     } else if (!pinentryActive) {
       pinentryAutoAsked = false
       clearRepromptGrant()
@@ -3447,6 +3497,23 @@ Item {
       // count as "already typing here" and skip the field the screen opens on.
       presenter.focusField("keyCatcher")
     }
+  }
+
+  // The panel showing: a fresh open, or the way back from pinentry.
+  //
+  // It can also open underneath a pinentry that is already asking: showing
+  // the popout makes the unlock form visible inside show(), before `opened`
+  // reads true here, and the form asks pinentry on its own (UnlockForm.qml,
+  // armOfferedMethod()). beginPinentry() then saw a closed panel and hid
+  // nothing, and the panel kept the keyboard while pinentry waited for it
+  // (#132). Such an open is still the user's: its startup work runs now, as
+  // for a panel already open when pinentry was asked, and hideForPinentry()
+  // then hides it and has it shown again, as a resume, once pinentry answers.
+  // Deferred, so the hide neither runs inside the notification that is
+  // showing the popout nor reads a `presenter` not yet re-evaluated.
+  function panelShown() {
+    if (!resumeFromPinentry()) onPanelOpened()
+    if (pinentryActive) Qt.callLater(hideForPinentry)
   }
 
   function onPanelOpened() {
@@ -3482,7 +3549,9 @@ Item {
   // -------------------------------------------------------------------------
 
   function refreshStatus() {
-    errorMessage = ""
+    // A delayed probe or wake-up refresh must not erase why the vault locked
+    // or that its last automatic synchronization failed.
+    if (errorMessage !== vaultHelperLostMessage && errorMessage !== autoSyncError) errorMessage = ""
     if (logoutPending) return
     // Wait for the dependency probe, which owns the first status transition.
     if (!depsChecked) {
@@ -3555,6 +3624,9 @@ Item {
       vaultEpoch += 1
       storeCurrentSession()
 
+      // Unlocked now: drop any lock reason (refreshStatus() keeps the
+      // helper-loss one) so it doesn't hide the flash below.
+      errorMessage = ""
       // bw just minted this key: trust it and load now; `bw status` runs
       // alongside, only for the account email.
       status = "unlocked"
@@ -3592,8 +3664,11 @@ Item {
     }
     var token = String(rawToken || "").trim()
     if (token) {
+      // Adopted unconfirmed: `bw status` may yet reject it, and a bump now
+      // would drop a quick unlock already running. Only a session it replaces
+      // has reads to invalidate.
+      if (session && session !== token) vaultEpoch += 1
       session = token
-      vaultEpoch += 1
     }
     runStatusCheck()
     // A remembered session is usually still good, so read the list alongside
@@ -3618,7 +3693,35 @@ Item {
 
   // An authentication the user has actually submitted, still running.
   function authAttemptInFlight() {
-    return loginSubmitted || unlockSubmitted
+    return loginSubmitted || unlockSubmitted || unlockJobInFlight()
+  }
+
+  // A quick unlock (PIN or fingerprint) between the user's answer and the
+  // password it yields: the envelope open runs while `unlockSubmitted` is
+  // still false, and a status result landing then must not cancel it.
+  function unlockJobInFlight() {
+    return pinUnlockSubmitted || envelopeUnlockJobPending()
+  }
+
+  // With `method`, only that method's jobs count: a dropped job's cleanup is
+  // about its own state, which another method's pending job does not hold.
+  function envelopeUnlockJobPending(method) {
+    if (envelopeJob && envelopeJob.unlock && !envelopeJob.cancelled
+        && (!method || envelopeJob.method === method)) return true
+    for (var i = 0; i < envelopeJobs.length; i++) {
+      if (envelopeJobs[i].unlock && !envelopeJobs[i].cancelled
+          && (!method || envelopeJobs[i].method === method)) return true
+    }
+    return false
+  }
+
+  // A status held back by an unlock job is asked for again once the job is
+  // over (unless a typed unlock has taken its place), so a vault unlocked or
+  // closed elsewhere meanwhile is still noticed.
+  function recheckStatusAfterUnlock() {
+    if (!statusRecheckAfterUnlock || authAttemptInFlight()) return
+    statusRecheckAfterUnlock = false
+    Qt.callLater(runStatusCheck)
   }
 
   function onStatusFinished(rawJson) {
@@ -3630,6 +3733,7 @@ Item {
     // it started; acting on it would cancel the submitted login. The attempt
     // will set the state itself.
     if (authAttemptInFlight()) {
+      if (unlockJobInFlight() && !loginSubmitted && !unlockSubmitted) statusRecheckAfterUnlock = true
       return
     }
     isLoading = false
@@ -4718,12 +4822,17 @@ Item {
     generatorReturnScreen = (currentScreen === "edit") ? "edit" : "main"
     screenBeforeSettings = "main"
     currentScreen = "generator"
+    restoreGeneratorOptions()
     // The form wants a fresh value; a standalone visit keeps the last one.
     if (generatorFeedsForm || !genValue) regenerate()
   }
 
   function closeGenerator() {
     var toForm = generatorFeedsForm
+    if (genOptsSaveTimer.running) {
+      genOptsSaveTimer.stop()
+      saveGeneratorOptions()
+    }
     currentScreen = generatorReturnScreen
     generatorReturnScreen = "main"
     // Land back on the field the trip was about, filled in or not.
@@ -4926,11 +5035,35 @@ Item {
 
   // Every control changes options here: normalise and regenerate.
   function setGenOpt(key, value) {
+    restoreGeneratorOptions()
     var next = {}
     for (var k in genOpts) next[k] = genOpts[k]
     next[key] = value
     genOpts = Model.normalizeGeneratorOptions(next)
+    genOptsRetries = 0
+    genOptsSaveTimer.restart()
     regenerate()
+  }
+
+  // Once per service: after that the options in memory are the newer ones.
+  function restoreGeneratorOptions() {
+    if (genOptsRestored) return
+    genOptsRestored = true
+    genOpts = Model.restoreGeneratorOptions(setting("generatorOptions", null))
+    genOptsSaved = JSON.stringify(Model.generatorOptionsToStore(genOpts))
+  }
+
+  // The options only, never a generated value; no "Saved" flash.
+  function saveGeneratorOptions() {
+    var stored = Model.generatorOptionsToStore(genOpts)
+    if (JSON.stringify(stored) === genOptsSaved) return
+    if (genOptsWriteProc.running) {
+      genOptsWritePending = true
+      return
+    }
+    genOptsSaved = JSON.stringify(stored)
+    genOptsWriteProc.command = Model.settingWriteCommand("generatorOptions", stored, "json")
+    genOptsWriteProc.running = true
   }
 
   function copyGenerated() {
@@ -5069,14 +5202,28 @@ Item {
       env[Model.pinEnvVar()] = held || String(pinEntry || "")
       queueEnvelopeJob({
         command: Model.unlockEnvelopeOpenCommand(envelopeTool(), envelopeAccount(), { kind: "pin" }),
-        env: env, secretOutput: true, holdOutput: true, unlock: true,
-        onDone: function(code, out) { root.onEnvelopePinResult(code, out) }
+        env: env, secretOutput: true, holdOutput: true, unlock: true, method: "pin",
+        onDone: function(code, out) { root.onEnvelopePinResult(code, out) },
+        onDropped: function(cancelled) { root.onPinJobDropped(cancelled) }
       })
       return
     }
     pinUnlockProc.command = Model.pinUnlockCommand(activeSlot)
     pinUnlockProc.capture = "secret:" + newHeldName()
     pinUnlockProc.running = true
+  }
+
+  // The PIN's open was discarded without an answer (the vault's state moved
+  // on under it). A deliberate cancel has already cleaned up; anything else
+  // must not leave the submit marked busy, which would ignore the next PIN.
+  function onPinJobDropped(cancelled) {
+    if (cancelled || envelopeUnlockJobPending("pin")) return
+    releaseHeldPin()
+    if (!pinUnlockSubmitted && !pinBusy) return
+    pinUnlockSubmitted = false
+    pinBusy = false
+    if (status === "locked") pinUnlockError = "PIN unlock was interrupted. Enter your PIN again."
+    recheckStatusAfterUnlock()
   }
 
   // The envelope's answer to a PIN; exit 3 is a wrong PIN.
@@ -5126,6 +5273,7 @@ Item {
       releaseHeldPin()
       forgetHeldPassword(password)
       clearProcessCollectorSoon(pinUnlockProc)
+      recheckStatusAfterUnlock()
       return
     }
     var pw = String(password || "")
@@ -5133,6 +5281,9 @@ Item {
     if (exitCode !== 0 || !pw) {
       var viaPinentry = releaseHeldPin()
       countWrongPin()
+      // A status held back while this job ran is asked for again now; a
+      // pinentry retry that follows holds the next one back the same way.
+      recheckStatusAfterUnlock()
       if (viaPinentry) retryPinentryPin()
       return
     }
@@ -5188,15 +5339,22 @@ Item {
   // Setup and settings
   // -------------------------------------------------------------------------
 
+  // The opt-in features whose tools the setup screen lists.
+  function dependencyFeatures() {
+    return { autoType: autoTypeEnabled }
+  }
+
   function checkDependencies() {
     if (!depsCheckProc.running) depsCheckProc.running = true
+    // The setup screen's wtype row says whether a key runs auto-type.
+    if (autoTypeEnabled && currentScreen === "setup") inspectAutoTypeKeybind()
   }
 
   function onDependenciesChecked(raw) {
     depsRaw = String(raw || "")
     var bwId = Model.dependencyBwId(depsRaw)
     var cached = bwVersionKnown && bwId !== "" && bwId === bwVersionId
-    dependencies = Model.parseDependencies(depsRaw, cached ? bwVersionValue : null)
+    dependencies = Model.parseDependencies(depsRaw, cached ? bwVersionValue : null, dependencyFeatures())
     // Off the status probe's path: only SSH support waits for the version.
     if (!cached && Model.dependencyInstalled(dependencies, "bw")) probeBwVersion(bwId)
     depsChecked = true
@@ -5244,7 +5402,7 @@ Item {
       if (Model.dependencyInstalled(dependencies, "bw")) probeBwVersion(latestId)
       return
     }
-    dependencies = Model.parseDependencies(depsRaw, bwVersionValue)
+    dependencies = Model.parseDependencies(depsRaw, bwVersionValue, dependencyFeatures())
   }
 
   readonly property var missingRequired: Model.missingRequired(dependencies)
@@ -5262,11 +5420,18 @@ Item {
 
   function installMissing() {
     var pkgs = Model.missingPackages(dependencies)
-    var cmd = Model.installPackagesCommand(pkgs,
+    var cmd = Model.dependencyInstallCommand(dependencies, pkgs,
       pkgs.length === 1 ? "Bitwarden CLI" : Tr.text("Bitwarden plugin dependencies"))
     if (!cmd) return
     Quickshell.execDetached(cmd)
-    flashNotification(Tr.text("Installing -- this screen updates itself"))
+    flashNotification(Model.installNeedsConfirmation(dependencies, pkgs)
+      ? Tr.text("Answer pacman in the installer -- this screen updates itself")
+      : Tr.text("Installing -- this screen updates itself"))
+  }
+
+  // The Install buttons' tooltips: what they will run.
+  function installHint(pkgs) {
+    return Model.dependencyInstallHint(dependencies, pkgs)
   }
 
   function installOne(dep) {
@@ -5276,10 +5441,12 @@ Item {
       runFingerprintSetup()
       return
     }
-    var cmd = Model.installPackagesCommand([dep.pkg], dep.label)
+    var cmd = Model.dependencyInstallCommand(dependencies, [dep.pkg], dep.label)
     if (!cmd) return
     Quickshell.execDetached(cmd)
-    flashNotification(Tr.text("Installing ") + dep.pkg + " -- this screen updates itself")
+    flashNotification(Model.installNeedsConfirmation(dependencies, [dep.pkg])
+      ? Tr.text("Answer pacman in the installer -- this screen updates itself")
+      : Tr.text("Installing ") + dep.pkg + " -- this screen updates itself")
   }
 
   // Skip setup, releasing the status probe it was holding back.
@@ -5317,10 +5484,30 @@ Item {
     return !settingValue(entry)
   }
 
+  // A setting whose schema entry has `confirm` (auto-type) asks once more
+  // before it is turned on; until then the question is the row's note.
+  property string settingConfirmKey: ""
+
+  function toggleBoolSetting(entry) {
+    if (!entry || entry.type !== "bool") return
+    var on = Boolean(settingValue(entry))
+    if (!on && entry.confirm && settingConfirmKey !== entry.key) {
+      settingConfirmKey = entry.key
+      return
+    }
+    settingConfirmKey = ""
+    writeSetting(entry.key, !on, "bool")
+  }
+
   // The stored password is only as protected as the weakest way in; with
   // fingerprint on (no secret involved) a PIN or key adds nothing, and those
   // rows say so.
   function settingNote(entry) {
+    if (entry && entry.confirm && settingConfirmKey === entry.key) return entry.confirm
+    if (entry && entry.key === "autoTypeEnabled" && autoTypeEnabled && depsChecked
+        && !Model.dependencyInstalled(dependencies, "wtype")) {
+      return "wtype is not installed, so nothing can be typed yet: install it from Dependencies below."
+    }
     if (!entry || (entry.key !== "pinUnlock" && entry.key !== "fidoUnlock")) return ""
     if (!settingValue(entry) || !fingerprintUnlock || !fingerprintStored) return ""
     return "Fingerprint unlock is also on, so the stored password is only as protected as "
@@ -5347,6 +5534,7 @@ Item {
     // Only a heading beyond: stay put.
     if (i < 0 || i >= n) return
     settingsIndex = i
+    settingConfirmKey = ""
   }
 
   function firstSettingIndex() {
@@ -5395,18 +5583,21 @@ Item {
       else beginFidoSetup()
       return
     }
-    if (e.type === "bool") writeSetting(e.key, !settingValue(e), "bool")
+    if (e.type === "bool") toggleBoolSetting(e)
   }
 
   function openSettings() {
     closeFilterGroup()
     if (currentScreen !== "settings") screenBeforeSettings = currentScreen
     settingsFlash = ""
+    settingConfirmKey = ""
     settingsIndex = firstSettingIndex()
     uwsmFlash = ""
     uwsmConfirmPending = false
     checkDependencies()
     inspectUwsmFragment()
+    autoTypeKeybindResult = null
+    if (autoTypeEnabled) inspectAutoTypeKeybind()
     currentScreen = "settings"
     Qt.callLater(function() { eachView(function(view) { view.updateSettingsSticky() }) })
   }
@@ -5430,8 +5621,15 @@ Item {
   }
 
   function rememberTwoFactorMethod(method) {
-    if (!Model.isTwoFactorMethod(method)) return
-    if (method === rememberedTwoFactorMethod) return
+    if (!Model.isTwoFactorMethod(method)) {
+      // A login with no two-step method still moves an older email-keyed map
+      // to hashed keys (login-time only: a startup write would restart the shell).
+      var migrated = Model.migrateTwoFactorStore(twoFactorMethodStore)
+      if (migrated) writeSettingQuietly("twoFactorMethods", migrated, "json")
+      return
+    }
+    // An older map keyed by email is rewritten even when nothing changes.
+    if (method === rememberedTwoFactorMethod && !Model.twoFactorStoreHasPlainKeys(twoFactorMethodStore)) return
     var next = Model.rememberTwoFactorMethodIn(twoFactorMethodStore, loginEmail, method)
     if (next) writeSettingQuietly("twoFactorMethods", next, "json")
   }
@@ -5447,12 +5645,14 @@ Item {
   function settingValue(entry) {
     if (!entry) return 0
     switch (entry.key) {
+      case "autoSyncMinutes": return autoSyncMinutes
       case "autoLockMinutes": return autoLockMinutes
       case "clearClipboardSec": return clearClipboardSec
       case "lockOnScreenLock": return lockOnScreenLock
       case "lockOnSuspend": return lockOnSuspend
       case "autoCopyTotpSec": return autoCopyTotpSec
       case "closeOnCopy": return closeOnCopy
+      case "autoTypeEnabled": return autoTypeEnabled
       case "suggestOnOpen": return suggestOnOpen
       case "rememberSession": return rememberSession
       case "fingerprintUnlock": return fingerprintUnlock && fingerprintStored
@@ -5545,7 +5745,7 @@ Item {
   function openEnvelopeForFingerprint() {
     queueEnvelopeJob({
       command: Model.unlockEnvelopeOpenCommand(envelopeTool(), envelopeAccount(), { kind: "fingerprint" }),
-      secretOutput: true, holdOutput: true, unlock: true,
+      secretOutput: true, holdOutput: true, unlock: true, method: "fingerprint",
       onDone: function(code, out) {
         if (code === 0 && out) {
           root.fingerprintFromEnvelope = true
@@ -5564,6 +5764,14 @@ Item {
         root.fingerprintMessage = ""
         root.fingerprintError = "Could not read the stored password. Unlock with your master password."
         root.refreshEnvelope()
+      },
+      // Discarded without an answer: not left "Unlocking..." for nothing.
+      onDropped: function(cancelled) {
+        if (cancelled || root.envelopeUnlockJobPending("fingerprint")) return
+        root.fingerprintAuthorized = false
+        root.fingerprintMessage = ""
+        if (root.status === "locked") root.fingerprintError = "Fingerprint unlock was interrupted. Try again."
+        root.recheckStatusAfterUnlock()
       }
     })
   }
@@ -5648,17 +5856,32 @@ Item {
     })
   }
 
+  // The fingerprint wrap holds the envelope's data key in the clear, and the
+  // key is never rotated, so the envelope goes with the wrap (see "Removing a
+  // method from every account" in BitwardenModel.js): this account's PIN and
+  // FIDO2 ways in go too, and writeEnvelope()'s refresh reads their rows off.
   function forgetFingerprintUnlock() {
     requestMasterCredentialClear()
     legacyFingerprintStored = false
+    var notice = fingerprintForgottenText()
     if (envelopeSummary && envelopeSummary.fingerprint) {
-      removeQuickUnlockMethod({ kind: "remove", method: "fingerprint" })
+      removeQuickUnlockMethod({ kind: "delete" })
     }
     fingerprintStored = false
     cancelFingerprintUnlock()
     fingerprintMessage = ""
     fingerprintError = ""
-    flashNotification(Tr.text("Fingerprint unlock forgotten"))
+    flashNotification(notice)
+  }
+
+  // Names what the deletion took with it, from the account on screen's
+  // summary; other accounts' rows read off once each is switched to.
+  function fingerprintForgottenText() {
+    var s = envelopeSummary
+    var others = Boolean(s && s.fingerprint && (s.pin || (Array.isArray(s.fido) && s.fido.length > 0)))
+    return others
+      ? Tr.text("Fingerprint unlock forgotten; the stored password was deleted, so set up PIN or security-key unlock again")
+      : Tr.text("Fingerprint unlock forgotten")
   }
 
   onFingerprintUnlockChanged: {
@@ -5672,11 +5895,13 @@ Item {
         forgetFingerprintUnlock()
         return
       }
-      // Every account's way in, and its legacy copy, not only this one's.
+      // Every account's envelope that has the wrap, and its legacy copy, not
+      // only this one's; the purge's completion refreshes the summary.
+      var notice = fingerprintForgottenText()
       legacyFingerprintStored = false
       fingerprintStored = false
       purgeQuickUnlockMethod("fingerprint")
-      flashNotification(Tr.text("Fingerprint unlock forgotten"))
+      flashNotification(notice)
     } else {
       refreshFingerprintAvailability()
     }
@@ -5719,26 +5944,28 @@ Item {
   // Typed secrets in pinentry
   // -------------------------------------------------------------------------
   //
-  // The master password (unlock, re-prompt) and the PIN are typed into
-  // `pinentry`, a separate process, not into the panel: a string typed into
-  // the shell stays in its heap after it is cleared and lands in a shell core
-  // dump. The pinentry runs through the vault helper (Model.pinentryCommand()),
+  // The master password (unlock, re-prompt) and the PIN are typed into the
+  // plugin's own pinentry (pinentry/omarchy-pinentry), a separate process,
+  // not into the panel: a string typed into the shell stays in its heap after
+  // it is cleared and lands in a shell core dump. The pinentry runs through the vault helper (Model.pinentryCommand()),
   // which holds what was typed under a name; the shell sees only that name,
   // and uses it like the password a quick-unlock method produced
   // (Model.heldSecretRef()). Not available without the helper: while it is
   // starting, restarting or left stopped the panel waits for it rather than
   // offer its own field, which is used only where Model.typedSecretEntry()
-  // says (pinentry off, missing or declined, or the vault held in the shell
-  // as allowVaultWithoutHelper allows). Email login and the item forms are
-  // not covered.
+  // says (pinentry off, unable to run here or declined, or the vault held in
+  // the shell as allowVaultWithoutHelper allows). Email login and the item
+  // forms are not covered.
   //
-  // Set only by a probe that ran to its end and found no such program
-  // (Model.pinentryProbeMissing()): a probe killed or still running leaves
+  // Set only by a probe that ran to its end and found the prompt unable to
+  // run here (no frontend, or its `--check` failed: no quickshell, node,
+  // Wayland display or shell kit) (Model.pinentryProbeMissing()): a probe
+  // killed or still running leaves
   // pinentry offered, for the same reason as below.
   property bool pinentryMissing: false
   onPinentryMissingChanged: resetPinentryChoice()
-  // A run that failed (no display, a pinentry that needs a terminal, a helper
-  // that predates the capture, or a pinentry another program killed) is not
+  // A run that failed (a prompt that could not start, a helper that predates
+  // the capture, or a prompt another program killed) is not
   // remembered: the next attempt opens pinentry again, and the notice offers
   // the panel's field. That field is used only once the user picks it
   // (declinePinentry()), and only until the panel closes or the vault locks
@@ -5772,7 +5999,7 @@ Item {
   property string pinentryMasterName: ""
   property string heldPinName: ""
 
-  onPinentryProgramNameChanged: {
+  onOmarchyPinentryPathChanged: {
     resetPinentryChoice()
     probePinentry()
   }
@@ -5782,8 +6009,7 @@ Item {
   // Pinentry again for the next secret, with no notice.
   function resetPinentryChoice() {
     pinentryDeclined = false
-    pinentryNotice = usePinentry && pinentryMissing
-      ? "Pinentry is not installed. Typed here, it stays in the shell's memory until the shell restarts." : ""
+    pinentryNotice = usePinentry && pinentryMissing ? Model.pinentryMissingNotice() : ""
   }
 
   // The user picked the panel's field after pinentry failed.
@@ -5795,7 +6021,7 @@ Item {
 
   function probePinentry() {
     if (pinentryProbeProc.running) pinentryProbeProc.running = false
-    pinentryProbeProc.command = Model.pinentryProbeCommand(pinentryProgramName)
+    pinentryProbeProc.command = Model.pinentryProbeCommand(omarchyPinentryPath)
     pinentryProbeProc.running = true
   }
 
@@ -5813,7 +6039,7 @@ Item {
     var name = newHeldName()
     pinentryRun = { purpose: purpose, name: name, done: done }
     beginPinentry()
-    pinentryProc.command = Model.pinentryCommand(pinentryProgramName, {
+    var ask = {
       title: "Bitwarden",
       description: Model.pinentryDescription(purpose, userEmail),
       prompt: Model.pinentryPrompt(purpose),
@@ -5821,7 +6047,10 @@ Item {
       // The unlock's own floor, as for the field: a shorter PIN is asked for
       // again, not counted as a wrong attempt.
       minLength: purpose === "pin" ? Model.pinUnlockMinLength() : 0
-    })
+    }
+    pinentryProc.command = Model.pinentryCommand(omarchyPinentryPath, ask)
+    // The description names the account: environment, not argv.
+    pinentryProc.environment = Model.pinentryEnvironment(ask)
     pinentryProc.capture = "pinentry:" + name
     pinentryProc.running = true
   }
@@ -5855,8 +6084,18 @@ Item {
   function beginPinentry() {
     if (pinentryActive) return
     pinentryActive = true
-    pinentryWasOpen = opened
-    if (!opened) return
+    pinentryWasOpen = false
+    pinentryView = null
+    hideForPinentry()
+  }
+
+  // Hides every view's popout while pinentry asks, and remembers the one to
+  // show again after. A panel closed now is left alone, and is shown again
+  // only if it opens before the answer (panelShown()): one that never opened,
+  // as for the SSH approval popup's unlock, stays closed.
+  function hideForPinentry() {
+    if (!pinentryActive || pinentryWasOpen || !opened) return
+    pinentryWasOpen = true
     pinentryView = presenter
     eachView(function(view) { view.hidePopout() })
   }
@@ -5869,6 +6108,10 @@ Item {
     var view = pinentryView
     pinentryView = null
     if (!show) return
+    // Detached meanwhile (its monitor unplugged) it may be destroyed: the
+    // presenter shows instead, or nothing when no view is left.
+    if (views.indexOf(view) === -1) view = views.length > 0 ? presenter : null
+    if (!view) return
     pinentryReturning = true
     view.showPopout()
   }
@@ -6021,6 +6264,20 @@ Item {
     if (exitCode === 0 && out) {
       fingerprintFromEnvelope = false
       onUnlockSuccess(out)
+    } else if (exitCode === 0 && !err) {
+      // `bw` exits 0 with nothing at all when it never got a password (it
+      // falls back to a prompt it cannot show): not a wrong one.
+      pinentryMasterName = ""
+      forgetHeldPassword(pendingUnlockPassword)
+      pendingUnlockPassword = ""
+      forgetHeldPassword(pendingPinForMigration)
+      pendingPinForMigration = ""
+      pendingUnlockFrom = ""
+      fingerprintFromEnvelope = false
+      pinFromEnvelope = false
+      fidoFromEnvelope = false
+      errorMessage = "Could not deliver the password to Bitwarden. Please try again."
+      Qt.callLater(prepareUnlock)
     } else {
       // A master password typed into pinentry that `bw` refused: forgotten,
       // and asked for again. Any other failure is shown as it is.
@@ -6199,6 +6456,10 @@ Item {
     requestSessionCredentialClear()
 
     dropVaultState()
+    // Signed out (the IPC `lock`, a helper lost meanwhile): there is no vault
+    // to lock, and the unlock form would ask for an account that is not
+    // there. The cleanup above is all of it.
+    if (status === "unauthenticated") return
     status = "locked"
     currentScreen = "locked"
     fingerprintMessage = ""
@@ -6308,6 +6569,10 @@ Item {
   // The local purge for every way an open vault becomes unusable, separate
   // from `bw lock` and the keyring so a failed status can fail closed.
   function dropVaultState() {
+    if (errorMessage === autoSyncError) errorMessage = ""
+    lastSyncAttemptAt = 0
+    backgroundSync = false
+    autoSyncReloadPending = false
     initialSyncAttempted = false
     pinUnlockSubmitted = false
     cancelEnvelopeUnlockJobs()
@@ -6374,6 +6639,9 @@ Item {
     totpRestartPending = false
     totpCopyItemId = ""
     passwordCopyItemId = ""
+    passwordCopyNotice = ""
+    disarmAutoType()
+    stopAutoType()
     totpFollowupItem = null
     totpFollowupCode = ""
     genValue = ""
@@ -6412,7 +6680,7 @@ Item {
       statusProc, sessionHandoffProc, keyringLookupProc, pinUnlockProc, keyringLookupMasterProc,
       loginProc, unlockProc, listProc, listOrgsProc, listFoldersProc, listCollectionsProc, orgCollectionsProc,
       getItemProc, getTotpProc, generateProc, listSendsProc, createSendProc,
-      copyPasswordProc,
+      copyPasswordProc, autoTypeReadProc, envelopeProc,
       createItemProc, editItemProc, deleteItemProc, createFolderProc, attachmentProc,
       associationsReadProc, generateServeRequestProc
     ].concat(fidoUnlocker.secretProcesses())
@@ -6520,7 +6788,10 @@ Item {
 
   // `showSpinner` defaults to true; background refreshes pass false.
   function loadItems(showSpinner) {
-    if (!session) return
+    if (!session) {
+      abandonSyncReload()
+      return
+    }
     if (showSpinner !== false) isLoading = true
     // The early read for this vault is still running: it serves this request.
     if (listProc.running && listReadEarly && !vaultReadIsStale("items")) return
@@ -6528,10 +6799,22 @@ Item {
     listReadMode = Model.vaultListMode(dependencies)
     if (listReadMode === "blocked") {
       isLoading = false
+      abandonSyncReload()
       if (!vaultReadIsStale("items")) errorMessage = Model.vaultListBlockedMessage(dependencies)
       return
     }
     startVaultListRead(false)
+  }
+
+  // The reload a sync ends with (onSyncFinished(), maybeAutoSync()) cannot
+  // run: the sync is over, or "syncing" would stand until a lock. A plain
+  // load owes no sync and clears nothing.
+  function abandonSyncReload() {
+    if (!syncReloadPending) return
+    isSyncing = false
+    syncReloadPending = false
+    backgroundSync = false
+    autoSyncReloadPending = false
   }
 
   // The only launcher of the item read, with or without the agent branch.
@@ -6578,7 +6861,8 @@ Item {
     if (syncReloadPending) {
       syncReloadPending = false
       isSyncing = false
-      flashNotification(Tr.text("Vault synced with Bitwarden"))
+      if (!backgroundSync) flashNotification(Tr.text("Vault synced with Bitwarden"))
+      backgroundSync = false
     }
     if (metadataLoadPending || statusRefreshAfterItems) deferredMetadataTimer.restart()
     // The first read usually beat the handshake; see whether a load is owed.
@@ -6619,6 +6903,7 @@ Item {
     isLoading = false
     isSyncing = false
     syncReloadPending = false
+    backgroundSync = false
     metadataLoadPending = false
     metadataForceRefresh = false
     if (statusRefreshAfterItems) {
@@ -6832,6 +7117,7 @@ Item {
   // Qt keeps focus on hidden items, so a field on the screen just left would
   // keep the keyboard. Re-home focus on every screen change.
   onCurrentScreenChanged: {
+    if (currentScreen === "setup" && autoTypeEnabled) inspectAutoTypeKeybind()
     // Only while its screen is up: `bw serve` answers anything that reaches
     // its socket (the account email even when locked, and /unlock), so it
     // does not idle for the whole session.
@@ -6967,9 +7253,63 @@ Item {
     loadFolders(true)
   }
 
-  function syncVault() {
-    closeFilterGroup()
+  // Whether an automatic sync, or the list reload one still owes, may start.
+  // An open panel must be on the list. A closed one counts whatever screen it
+  // was left on, since opening an unlocked panel always returns to the list,
+  // except while pinentry hides it: that hands it back to the same screen.
+  function autoSyncIdle() {
+    return live && session !== "" && status === "unlocked"
+      && (opened ? currentScreen === "main" : !pinentryActive)
+      && !isLoading && !isUnlocking && !logoutPending && !authAttemptInFlight()
+      && !metadataLoadPending && !creatingFolder && !repromptBusy && !sendBusy
+      && !listProc.running && !listOrgsProc.running && !listFoldersProc.running
+      && !createItemProc.running && !editItemProc.running && !deleteItemProc.running
+      && !createFolderProc.running
+      // The reload a sync ends with needs a list read that can run.
+      && Model.vaultListMode(dependencies) !== "blocked"
+      // A list read hands the SSH agent its keys again, and the agent fails
+      // every signing request still waiting for approval when a load begins.
+      && sshTotalPendingCount === 0
+      // After a resume the auto-lock watchdog may not have polled yet; a
+      // vault past its deadline, or locking for a suspend, is about to lock.
+      && !suspendLockPending && !Model.autoLockExpired(autoLockArmedAt, autoLockMinutes, Date.now())
+  }
+
+  function maybeAutoSync() {
+    if (!autoSyncIdle() || isSyncing || syncProc.running) return
+    // A sync that finished while the user was editing left its reload for
+    // now. Complete it even if the setting was disabled meanwhile.
+    if (autoSyncReloadPending) {
+      autoSyncReloadPending = false
+      backgroundSync = true
+      isSyncing = true
+      syncReloadPending = true
+      beginInitialVaultLoad(false, true)
+      return
+    }
+    if (autoSyncMinutes <= 0) return
+    var now = Date.now()
+    // Wall-clock time catches up after suspend; a backward clock adjustment
+    // makes one attempt due rather than postponing retries indefinitely.
+    if (lastSyncAttemptAt > 0 && now >= lastSyncAttemptAt
+        && now - lastSyncAttemptAt < autoSyncMinutes * 60 * 1000) return
+    syncVault(true)
+  }
+
+  function syncVault(background) {
     if (!session) return
+    // Asked for while an automatic sync runs: that one becomes this request,
+    // reported like any sync the user asked for.
+    if (background !== true && backgroundSync && isSyncing) {
+      backgroundSync = false
+      closeFilterGroup()
+      return
+    }
+    if (isSyncing || syncProc.running) return
+    backgroundSync = background === true
+    autoSyncReloadPending = false
+    lastSyncAttemptAt = Date.now()
+    if (!backgroundSync) closeFilterGroup()
     isSyncing = true
     beginVaultRead("sync")
     syncProc.command = Model.syncCommand()
@@ -6979,13 +7319,22 @@ Item {
   function onSyncFinished(exitCode) {
     if (vaultReadIsStale("sync")) return
     if (exitCode === 0) {
+      if (errorMessage === autoSyncError) errorMessage = ""
       itemsLoadedAt = 0
-      syncReloadPending = true
-      beginInitialVaultLoad(true, true)
+      if (backgroundSync) {
+        isSyncing = false
+        autoSyncReloadPending = true
+        maybeAutoSync()
+      } else {
+        syncReloadPending = true
+        beginInitialVaultLoad(true, true)
+      }
     } else {
       isSyncing = false
       syncReloadPending = false
-      errorMessage = Tr.text("Sync failed")
+      if (!backgroundSync) errorMessage = Tr.text("Sync failed")
+      else if (!errorMessage || errorMessage === autoSyncError) errorMessage = autoSyncError
+      backgroundSync = false
     }
   }
 
@@ -8027,14 +8376,15 @@ Item {
     return true
   }
 
-  function copyToClipboard(text, label) {
+  // `notice` replaces the "<label> copied!" notification.
+  function copyToClipboard(text, label, notice) {
     if (!text || clipboardMissing()) return
     resetAutoLockTimer()
     var env = {}
     env[Model.clipboardEnvVar()] = String(text)
     detachWithEnvironment(Model.clipboardCopyCommand(clearClipboardSec), env)
     env = null
-    flashNotification(label + " copied!")
+    flashNotification(notice || (label + " copied!"))
   }
 
   // Only a copy marked sensitive is cleared: something the user copied
@@ -8043,13 +8393,14 @@ Item {
     Quickshell.execDetached(Model.clipboardClearSensitiveCommand())
   }
 
-  function requestPasswordCopy(itemId, typeCode) {
+  function requestPasswordCopy(itemId, typeCode, notice) {
     if (!session || !itemId) return
     if (copyPasswordProc.running) {
       errorMessage = Tr.text("Another password copy is still loading")
       return
     }
     passwordCopyItemId = String(itemId)
+    passwordCopyNotice = String(notice || "")
     beginVaultRead("passwordCopy")
     copyPasswordProc.command = Model.getPasswordCommand(itemId, typeCode)
     copyPasswordProc.running = true
@@ -8058,15 +8409,273 @@ Item {
   function onPasswordCopyFinished(exitCode, text) {
     var requested = passwordCopyItemId
     passwordCopyItemId = ""
+    var notice = passwordCopyNotice
+    passwordCopyNotice = ""
     // Drop the collector's plaintext copy once wl-copy has it.
     clearProcessCollectorSoon(copyPasswordProc)
     if (vaultReadIsStale("passwordCopy")) return
     var password = String(text || "")
     if (exitCode === 0 && requested && password) {
-      copyToClipboard(password, Tr.text("Password"))
+      copyToClipboard(password, Tr.text("Password"), notice)
       return
     }
     errorMessage = Tr.text("Could not read this password")
+  }
+
+  // -------------------------------------------------------------------------
+  // Auto-type (see "Auto-type" in BitwardenModel.js)
+  // -------------------------------------------------------------------------
+
+  // Turned off: nothing stays armed. Either way wtype's setup row follows.
+  onAutoTypeEnabledChanged: {
+    if (!autoTypeEnabled) disarmAutoType()
+    if (depsChecked) checkDependencies()
+    if (autoTypeEnabled) inspectAutoTypeKeybind()
+  }
+
+  // The key that runs the autoType IPC (see "Auto-type keybinding" in
+  // BitwardenModel.js): what bindings.lua and Hyprland have, the chord field
+  // under the setting, and the last register or remove's answer.
+  property var autoTypeKeybind: Model.autoTypeKeybindState(null)
+  // "" until the first inspection fills in a free suggestion.
+  property string autoTypeChordText: ""
+  readonly property var autoTypeChordCheck: Model.autoTypeChordCheck(autoTypeChordText, autoTypeKeybind)
+  property bool autoTypeKeybindBusy: false
+  property var autoTypeKeybindResult: null
+  property bool autoTypeKeybindRecheck: false
+
+  function inspectAutoTypeKeybind() {
+    if (autoTypeKeybindInspectProc.running) {
+      autoTypeKeybindRecheck = true
+      return
+    }
+    autoTypeKeybindInspectProc.running = true
+  }
+
+  function onAutoTypeKeybindInspected(raw) {
+    autoTypeKeybind = Model.autoTypeKeybindState(Model.parseAutoTypeKeybindInspection(raw))
+    if (autoTypeChordText === "") autoTypeChordText = Model.autoTypeChordSuggestion(autoTypeKeybind)
+    if (autoTypeKeybindRecheck) {
+      autoTypeKeybindRecheck = false
+      inspectAutoTypeKeybind()
+    }
+  }
+
+  function registerAutoTypeKeybind() {
+    if (autoTypeKeybindBusy || !autoTypeKeybind.canRegister) return
+    var check = autoTypeChordCheck
+    if (!check.ok) {
+      autoTypeKeybindResult = { ok: false, message: check.message }
+      return
+    }
+    autoTypeKeybindBusy = true
+    autoTypeKeybindResult = null
+    autoTypeKeybindActionProc.chord = check.chord
+    autoTypeKeybindActionProc.command = Model.autoTypeKeybindRegisterCommand(check.chord)
+    autoTypeKeybindActionProc.running = true
+  }
+
+  // Only the pair this plugin wrote; parseBindingsLua() says when that is.
+  function removeAutoTypeKeybind() {
+    if (autoTypeKeybindBusy || !autoTypeKeybind.removable) return
+    autoTypeKeybindBusy = true
+    autoTypeKeybindResult = null
+    autoTypeKeybindActionProc.chord = autoTypeKeybind.removableChord
+    autoTypeKeybindActionProc.command = Model.autoTypeKeybindRemoveCommand(autoTypeKeybind.removableChord)
+    autoTypeKeybindActionProc.running = true
+  }
+
+  function onAutoTypeKeybindActionFinished(exitCode, stdout) {
+    autoTypeKeybindResult = Model.parseAutoTypeKeybindResult(exitCode, stdout, autoTypeKeybindActionProc.chord)
+    autoTypeKeybindBusy = false
+    inspectAutoTypeKeybind()
+  }
+
+  // For users who keep their bindings elsewhere. Not a secret, so no
+  // sensitive mark and no timed clear.
+  function copyAutoTypeBindLine() {
+    var line = autoTypeChordCheck.line || Model.autoTypeBindLine(autoTypeKeybind.chord)
+    if (!line) return
+    var env = {}
+    env[Model.clipboardEnvVar()] = line
+    Quickshell.execDetached({ command: Model.clipboardCopyPlainCommand(), environment: env })
+    flashNotification("Keybinding line copied")
+  }
+
+  function autoTypeArmed() {
+    return autoTypeItemId !== "" && autoTypeArmEpoch === vaultEpoch
+  }
+
+  function disarmAutoType() {
+    autoTypeItemId = ""
+    autoTypeArmEpoch = -1
+    autoTypeArmTimer.stop()
+  }
+
+  // Ends a type in flight without a report: the helper's late answer is
+  // ignored (the sequence moves on) and wtype is killed (bash `exec`s it, so
+  // the pid is its own); its exit then finds nothing busy.
+  function stopAutoType() {
+    autoTypeWatchdog.stop()
+    autoTypeSeq += 1
+    autoTypeBusy = false
+    autoTypePendingText = ""
+    autoTypeTypedItemId = ""
+    autoTypeTypedEpoch = -1
+    if (autoTypeProc.running) autoTypeProc.running = false
+  }
+
+  // Ctrl+C and the row's button: copy a login's password and arm it, both
+  // after any re-prompt, so a cancelled prompt arms nothing, and arm the TOTP
+  // follow-up as Enter's copy does. True when the copy (or its prompt)
+  // started.
+  function copyPasswordAndArm(item) {
+    closeFilterGroup()
+    if (!autoTypeEnabled || status !== "unlocked" || !item || !Model.isLoginItem(item)) return false
+    if (!(item.hasPassword !== undefined ? item.hasPassword : Boolean(item.password))) return false
+    withReprompt(item, function() {
+      root.autoTypeItemId = String(item.id)
+      root.autoTypeArmEpoch = root.vaultEpoch
+      autoTypeArmTimer.restart()
+      // The poll runs while armed; a reading now is normally in before the
+      // key can be pressed, so the first type is not refused as stale.
+      if (!screenLockStateProc.running) screenLockStateProc.running = true
+      root.copyPasswordNow(item, "Password copied; auto-type armed for "
+        + Math.round(Model.autoTypeArmMs() / 1000) + " s")
+      root.armTotpFollowup(item)
+      if (root.closeOnCopy) root.close()
+    })
+    return true
+  }
+
+  // The `autoType` IPC. The answer says whether a type started; how it ended
+  // is only shown (finishAutoType()), since wtype runs after this returns.
+  function requestAutoType() {
+    if (!autoTypeEnabled) return "disabled"
+    if (status !== "unlocked" || !session) return "locked"
+    if (!autoTypeArmed()) return "not-armed"
+    if (autoTypeBusy) return "busy"
+    // Something of ours has the keyboard, and would get the text: the
+    // panel (its search box, say), the SSH approval card, pinentry.
+    if (opened || sshPrompt !== null || pinentryActive) {
+      if (opened) errorMessage = "Close the panel first: auto-type types into the window it returns to"
+      return "panel-open"
+    }
+    // A stale or missing reading counts as locked; the arm is kept for the
+    // next press, by which time the poll has one.
+    if (!screenLockReadingFresh() || screenIsLocked) return "screen-locked"
+    var item = Model.findItemById(items, autoTypeItemId)
+    // One type per arm, whatever comes of it.
+    disarmAutoType()
+    if (!item || !Model.isLoginItem(item)) {
+      finishAutoType(false, "gone")
+      return "failed"
+    }
+    autoTypeTypedItemId = String(item.id)
+    autoTypeTypedEpoch = vaultEpoch
+    autoTypeSeq += 1
+    var seq = autoTypeSeq
+    autoTypeBusy = true
+    if (vaultHelperActive) {
+      // The helper reads and types it; the password never comes here. An
+      // item it does not hold is not read with `bw` instead, which would.
+      if (!item.secretsHeld) {
+        finishAutoType(false, "not-held")
+        return "failed"
+      }
+      autoTypeWatchdog.restart()
+      vaultQuery("autoType", { id: String(item.id) }, function(ok, value) {
+        if (seq !== root.autoTypeSeq) return
+        root.finishAutoType(ok, ok ? "" : String(value || ""))
+      })
+      return "started"
+    }
+    // The vault is held here (no helper): the item's own password, or one
+    // `bw get password`.
+    if (item.password) {
+      typeHere(item.username, item.password)
+      return "started"
+    }
+    autoTypeReadProc.itemId = String(item.id)
+    beginVaultRead("autoType")
+    autoTypeWatchdog.restart()
+    autoTypeReadProc.command = Model.getPasswordCommand(item.id, item.typeCode)
+    autoTypeReadProc.running = true
+    return "started"
+  }
+
+  function onAutoTypeRead(exitCode, text, itemId) {
+    // The collector's plaintext copy goes once wtype has the text.
+    clearProcessCollectorSoon(autoTypeReadProc)
+    // Or given up on already (a lock, the watchdog): nothing to report.
+    if (vaultReadIsStale("autoType") || !autoTypeBusy) {
+      autoTypeBusy = false
+      return
+    }
+    var item = Model.findItemById(items, itemId)
+    if (exitCode !== 0 || !text || !item) {
+      finishAutoType(false, "unread")
+      return
+    }
+    typeHere(item.username, String(text))
+  }
+
+  // wtype from the shell: the text goes to its stdin as it starts
+  // (autoTypeProc.onStarted), never into argv or the environment.
+  function typeHere(username, password) {
+    var typed = Model.autoTypeText(username, password)
+    if (!typed.ok) {
+      finishAutoType(false, typed.reason)
+      return
+    }
+    autoTypePendingText = typed.text
+    autoTypeProc.command = Model.autoTypeCommand()
+    autoTypeProc.stdinEnabled = true
+    autoTypeWatchdog.restart()
+    autoTypeProc.running = true
+  }
+
+  // A wtype the lock or the watchdog killed has been dealt with (nothing is
+  // busy); its exit is not a failure to report.
+  function onAutoTypeExited(exitCode) {
+    autoTypePendingText = ""
+    if (!autoTypeBusy) return
+    finishAutoType(exitCode === 0, exitCode === 127 ? "missing" : "failed")
+  }
+
+  // Success only from wtype's exit 0 (the helper answers after it). A type
+  // the helper had to interrupt ("stopped": the vault locked, was left or
+  // the helper shut down) ends quietly; the lock explains itself.
+  function finishAutoType(ok, reason) {
+    autoTypeWatchdog.stop()
+    autoTypeBusy = false
+    var typedId = autoTypeTypedEpoch === vaultEpoch ? autoTypeTypedItemId : ""
+    autoTypeTypedItemId = ""
+    autoTypeTypedEpoch = -1
+    if (ok) {
+      resetAutoLockTimer()
+      flashNotification("Auto-typed")
+      copyTotpAfterAutoType(typedId)
+      return
+    }
+    if (reason === "stopped") return
+    var message = Model.autoTypeFailureMessage(reason)
+    errorMessage = message
+    Quickshell.execDetached(Model.autoTypeFailedNoticeCommand(message))
+  }
+
+  // After a successful type, the login's TOTP code goes to the clipboard, as
+  // it does autoCopyTotpSec after Enter's password copy, and 0 turns both
+  // off. A fresh code (fetchTotp(); the helper computes it where it holds the
+  // key), and the auto-copy still pending from the arm is stopped so an older
+  // code cannot land over it. The code stays out of the notification.
+  function copyTotpAfterAutoType(itemId) {
+    if (!itemId || autoCopyTotpSec <= 0 || status !== "unlocked") return
+    var item = Model.findItemById(items, itemId)
+    if (!item || !Model.isLoginItem(item) || !item.hasTotp) return
+    if (totpFollowupItem && totpFollowupItem.id === item.id) autoTotpTimer.stop()
+    fetchTotp(item.id, true)
+    notifyTotpCopied()
   }
 
   // Enter on a row: copy a login's password (then arm the TOTP follow-up);
@@ -8099,25 +8708,33 @@ Item {
     // Nothing will be on the clipboard: arming the TOTP follow-up and closing
     // the panel would leave the user pasting an older copy.
     if (clipboardMissing()) return
-    // Step 1: Copy password
     copyPasswordNow(item)
-
-    // Step 2: If item has TOTP, arm follow-up and schedule auto-copy!
-    if (item.hasTotp) {
-      totpFollowupItem = item
-      totpFollowupActive = true
-      fetchTotp(item.id)
-      totpFollowupTimer.restart()
-
-      if (autoCopyTotpSec > 0) {
-        autoTotpTimer.interval = autoCopyTotpSec * 1000
-        autoTotpTimer.restart()
-      }
-    }
-
+    armTotpFollowup(item)
     if (closeOnCopy) {
       close()
     }
+  }
+
+  // After a login's password copy (Enter's, or the auto-type arm's), for an
+  // item with TOTP: Enter again copies the code while the follow-up lasts,
+  // and autoCopyTotpSec later it is copied anyway (autoTotpTimer). Called
+  // only once any re-prompt has passed.
+  function armTotpFollowup(item) {
+    if (!item || !item.hasTotp) return
+    totpFollowupItem = item
+    totpFollowupActive = true
+    fetchTotp(item.id)
+    totpFollowupTimer.restart()
+    if (autoCopyTotpSec > 0) {
+      autoTotpTimer.interval = autoCopyTotpSec * 1000
+      autoTotpTimer.restart()
+    }
+  }
+
+  // The desktop notice for a TOTP copy made with the panel likely closed.
+  // The code stays out of it (history, lock screen).
+  function notifyTotpCopied() {
+    Quickshell.execDetached(["notify-send", "--app-name", "Bitwarden", "-t", "4000", Tr.text("TOTP Code Copied"), "2FA verification code ready to paste"])
   }
 
   function copyPassword(item) {
@@ -8126,10 +8743,12 @@ Item {
     withReprompt(item, function() { root.copyPasswordNow(item) })
   }
 
-  function copyPasswordNow(item) {
+  // `notice` replaces the "Password copied!" notification.
+  function copyPasswordNow(item, notice) {
     closeFilterGroup()
     if (!item || !Model.isLoginItem(item)) return
     if (clipboardMissing()) return
+    var copied = notice || "Password copied!"
     learnFromPick(item)
     if (item.secretsHeld && vaultHelperActive) {
       // The helper hands the password to wl-copy; it never comes here.
@@ -8139,7 +8758,7 @@ Item {
           if (epoch !== root.vaultEpoch) return
           if (ok) {
             root.resetAutoLockTimer()
-            root.flashNotification("Password copied!")
+            root.flashNotification(copied)
           } else {
             root.errorMessage = Tr.text("Could not read this password")
           }
@@ -8148,11 +8767,11 @@ Item {
     }
     var pass = (detailItem && detailItem.id === item.id && detailPassword) ? detailPassword : (item.password || "")
     if (pass) {
-      copyToClipboard(pass, Tr.text("Password"))
+      copyToClipboard(pass, Tr.text("Password"), copied)
       return
     }
     if (session) {
-      requestPasswordCopy(item.id, item.typeCode)
+      requestPasswordCopy(item.id, item.typeCode, copied)
     } else {
       errorMessage = Tr.text("Vault is locked or session expired. Please unlock your vault.")
     }
@@ -8231,6 +8850,17 @@ Item {
   // Timers
   // -------------------------------------------------------------------------
 
+  // One service owns this timer, including on multi-monitor setups. Never
+  // unlocks the vault or refreshes the idle-lock deadline to do network work.
+  Timer {
+    id: autoSyncTimer
+    interval: 30000
+    repeat: true
+    running: root.live && root.status === "unlocked" && root.session !== ""
+      && (root.autoSyncMinutes > 0 || root.autoSyncReloadPending)
+    onTriggered: root.maybeAutoSync()
+  }
+
   Timer {
     id: searchDebounceTimer
     interval: 50
@@ -8273,8 +8903,7 @@ Item {
       if (root.totpFollowupItem && root.totpFollowupItem.hasTotp) {
         // Armed only by a copy that passed any re-prompt.
         root.copyTotpCodeNow(root.totpFollowupItem)
-        // The code stays out of the notification (history, lock screen).
-        Quickshell.execDetached(["notify-send", "--app-name", "Bitwarden", "-t", "4000", Tr.text("TOTP Code Copied"), "2FA verification code ready to paste"])
+        root.notifyTotpCopied()
         root.totpFollowupActive = false
       }
     }
@@ -8505,6 +9134,24 @@ Item {
     command: Model.uwsmWriteCommand()
     stdout: StdioCollector { id: uwsmWriteStdout; waitForEnd: true }
     onExited: function(exitCode) { root.onUwsmActionFinished(exitCode, uwsmWriteStdout.text) }
+  }
+
+  Process {
+    id: autoTypeKeybindInspectProc
+    command: Model.autoTypeKeybindInspectCommand()
+    stdout: StdioCollector {
+      id: autoTypeKeybindInspectStdout
+      waitForEnd: true
+      onStreamFinished: root.onAutoTypeKeybindInspected(text)
+    }
+  }
+
+  Process {
+    id: autoTypeKeybindActionProc
+    // The chord the running register or remove is for, for its message.
+    property string chord: ""
+    stdout: StdioCollector { id: autoTypeKeybindActionStdout; waitForEnd: true }
+    onExited: function(exitCode) { root.onAutoTypeKeybindActionFinished(exitCode, autoTypeKeybindActionStdout.text) }
   }
 
   Process {
@@ -9003,6 +9650,34 @@ Item {
     }
   }
 
+  // Its own process: settingWriteProc may be busy with a setting, and a
+  // Process ignores a new command while it runs.
+  Process {
+    id: genOptsWriteProc
+    onExited: function(exitCode) {
+      if (root.genOptsWritePending) {
+        if (exitCode !== 0) root.genOptsSaved = ""
+        root.genOptsWritePending = false
+        root.saveGeneratorOptions()
+        return
+      }
+      // Not saved: tried once more, then left to the next change.
+      if (exitCode !== 0) {
+        root.genOptsSaved = ""
+        if (root.genOptsRetries < 1) {
+          root.genOptsRetries++
+          genOptsSaveTimer.restart()
+        }
+      }
+    }
+  }
+
+  Timer {
+    id: genOptsSaveTimer
+    interval: 800
+    onTriggered: root.saveGeneratorOptions()
+  }
+
   Timer {
     id: settingsFlashTimer
     interval: 1600
@@ -9366,6 +10041,55 @@ Item {
     }
   }
 
+  // Auto-type's `bw get password`, only when the vault is held in the shell
+  // (no helper).
+  VaultProcess {
+    id: autoTypeReadProc
+    vault: root
+    environment: root.bwEnv()
+    property string itemId: ""
+    stdout: VaultCollector { id: autoTypeReadStdout; waitForEnd: true }
+    onExited: function(exitCode) {
+      if (root.finishScrubRun(autoTypeReadProc)) return
+      root.onAutoTypeRead(exitCode, autoTypeReadStdout.text, autoTypeReadProc.itemId)
+    }
+  }
+
+  // wtype from the shell (no helper): the text goes to its stdin and is
+  // dropped once written.
+  Process {
+    id: autoTypeProc
+    onStarted: {
+      write(root.autoTypePendingText)
+      root.autoTypePendingText = ""
+      stdinEnabled = false
+    }
+    onExited: function(exitCode) { root.onAutoTypeExited(exitCode) }
+  }
+
+  // An arm is one gesture, not a standing authorization.
+  Timer {
+    id: autoTypeArmTimer
+    interval: Model.autoTypeArmMs()
+    repeat: false
+    onTriggered: root.disarmAutoType()
+  }
+
+  // The helper's answer, or without it the `bw get password` and wtype, is
+  // waited for this long; a stuck one is killed rather than left "busy".
+  Timer {
+    id: autoTypeWatchdog
+    interval: Model.autoTypeAnswerMs()
+    repeat: false
+    onTriggered: {
+      if (!root.autoTypeBusy) return
+      if (autoTypeReadProc.running) autoTypeReadProc.running = false
+      if (autoTypeProc.running) autoTypeProc.running = false
+      root.autoTypeSeq += 1
+      root.finishAutoType(false, "timeout")
+    }
+  }
+
   Process {
     id: activeWindowProc
     command: Model.activeWindowCommand()
@@ -9467,6 +10191,10 @@ Item {
     }
     function sync(): string { root.syncVault(); return "syncing" }
     function status(): string { return root.status }
+    // Types the armed entry's username, Tab and password into the focused
+    // window (see requestAutoType()). "started" is not delivery: the panel
+    // says how it went.
+    function autoType(): string { return root.requestAutoType() }
     // The accounts the panel holds (emails and servers only) and which is
     // active.
     function accounts(): string {

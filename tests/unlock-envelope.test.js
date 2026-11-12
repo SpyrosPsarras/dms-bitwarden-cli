@@ -138,7 +138,7 @@ function suite(realCreds) {
         ARGV_LOG: argvLog,
         HMAC_LOG: hmacLog,
         FAKE_FIDO_CREDS: [FIDO_CRED_A, FIDO_CRED_B].join(",")
-      }, realCreds ? {
+      }, Model.envelopeAccountEnv(ACCOUNT), realCreds ? {
         XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR || "",
         DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS || ""
       } : {}, secrets || {}, extra || {})
@@ -180,7 +180,7 @@ function suite(realCreds) {
       open({ kind: "master" }, { [SECRET]: "not it" }).code, 3)
     eq(tag + "another account is refused",
       run(Model.unlockEnvelopeOpenCommand(tool, { id: "user-9999", server: ACCOUNT.server }, { kind: "master" }),
-        { [SECRET]: PASSWORD }).code, 6)
+        { [SECRET]: PASSWORD }, Model.envelopeAccountEnv({ id: "user-9999", server: ACCOUNT.server })).code, 6)
 
     // --- adding methods needs the master password, and stores nothing typed ---
     let before = stored()
@@ -376,8 +376,22 @@ function suite(realCreds) {
         r.code === 0 && Model.parseKeyringRepair(r.out).rejoined === 0 && stored() === good, r.out)
     }
 
-    // --- presence, and clearing ---
+    // --- presence, deleting, and clearing ---
     eq(tag + "presence is reported without the secret", run(Model.keyringHasEntryCommand(Model.KEYRING_ENVELOPE)).out.trim(), "yes")
+    // Turning fingerprint unlock off deletes the envelope: a clear of the
+    // entry, with nothing opened and no secret anywhere in it.
+    const del = Model.unlockEnvelopeUpdateCommand(tool, ACCOUNT, { kind: "delete" })
+    check(tag + "deleting the envelope is a clear of its entry, opening nothing",
+      /secret-tool clear 'qs-bitwarden-cli' 'unlock_envelope'|secret-tool clear service 'qs-bitwarden-cli' account 'unlock_envelope'/.test(del[2])
+        && !/QSBW_|__load|__unseal|__store|remove|argon2|systemd-creds/.test(del[2]), del[2])
+    eq(tag + "deleting needs no secret", run(del).code, 0)
+    eq(tag + "and the keyring has it no more", stored(), null)
+    eq(tag + "deleting what is already gone is the state wanted", run(del).code, 0)
+    eq(tag + "inspect then says absent", run(Model.unlockEnvelopeInspectCommand(tool)).code, E.absent)
+    eq(tag + "a new password after it starts a fresh envelope",
+      run(Model.unlockEnvelopeCreateCommand(tool, ACCOUNT), { [SECRET]: PASSWORD }).code, 0)
+    check(tag + "with only the master wrap", (() => { const n = summary(); return n.master && !n.pin && !n.fingerprint && n.fido.length === 0 })(),
+      JSON.stringify(summary()))
     run(Model.keyringClearEntryCommand(Model.KEYRING_ENVELOPE))
     eq(tag + "clearing removes it", stored(), null)
     eq(tag + "and presence says so", run(Model.keyringHasEntryCommand(Model.KEYRING_ENVELOPE)).out.trim(), "no")
@@ -392,6 +406,9 @@ function suite(realCreds) {
     const keySecrets = fs.existsSync(hmacLog) ? fs.readFileSync(hmacLog, "utf8").trim().split("\n").filter(Boolean) : []
     check(tag + "no secret a key handed out ever appeared in an argv",
       keySecrets.length > 0 && keySecrets.every(k => !argv.includes(k)), "found in the argv log")
+    check(tag + "the account id and server never appeared in an argv",
+      !argv.includes(ACCOUNT.id) && !argv.includes("bitwarden.com") && !argv.includes("user-9999"),
+      "found in the argv log")
     check(tag + "no derived key appeared in an argv either",
       !/[0-9a-f]{64}/.test(argv), (argv.match(/[0-9a-f]{64}/) || [""])[0])
     check(tag + "the argv log actually recorded the tools",
@@ -401,6 +418,27 @@ function suite(realCreds) {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }
+}
+
+// The account is in the environment, so it is in no command (argv) at all:
+// not as flags, and not in the script text that bash -c carries.
+{
+  const commands = {
+    open: Model.unlockEnvelopeOpenCommand("/t", ACCOUNT, { kind: "master" }),
+    create: Model.unlockEnvelopeCreateCommand("/t", ACCOUNT),
+    add: Model.unlockEnvelopeUpdateCommand("/t", ACCOUNT, { kind: "add-pin" }),
+    rotate: Model.unlockEnvelopeUpdateCommand("/t", ACCOUNT, { kind: "rotate", auth: { kind: "pin" } }),
+    check: Model.unlockEnvelopeCheckCommand("/t", ACCOUNT),
+    delete: Model.unlockEnvelopeUpdateCommand("/t", ACCOUNT, { kind: "delete" }),
+    migrate: Model.legacyPinMigrationCommand("/t", ACCOUNT)
+  }
+  for (const [name, argv] of Object.entries(commands)) {
+    const text = JSON.stringify(argv)
+    check(`${name}: no account id, server or flag for them in the argv`,
+      !text.includes(ACCOUNT.id) && !text.includes(ACCOUNT.server) && !/--account-id|--server/.test(text), text.slice(0, 200))
+  }
+  eq("the account travels in the environment", JSON.stringify(Model.envelopeAccountEnv(ACCOUNT)),
+    JSON.stringify({ QSBW_ACCOUNT_ID: ACCOUNT.id, QSBW_SERVER: ACCOUNT.server }))
 }
 
 suite(false)
@@ -445,6 +483,15 @@ check("a FIDO2 credential that is not base64 is refused",
 check("an unknown method is refused", refused(Model.unlockEnvelopeOpenCommand("/t", ACCOUNT, { kind: "face" })), "")
 check("removing the master wrap is not an operation",
   refused(Model.unlockEnvelopeUpdateCommand("/t", ACCOUNT, { kind: "remove", method: "master" })), "")
+check("deleting the envelope is refused on the same bad arguments as any update",
+  refused(Model.unlockEnvelopeUpdateCommand("t", ACCOUNT, { kind: "delete" }))
+    && refused(Model.unlockEnvelopeUpdateCommand("/t", null, { kind: "delete" }))
+    && refused(Model.unlockEnvelopeUpdateCommand("/t", { id: "", server: "s" }, { kind: "delete" }))
+    && refused(Model.unlockEnvelopeUpdateCommand("/t", { id: "a", server: "s", slot: "../x" }, { kind: "delete" })), "")
+check("and names the slot's own entry",
+  Model.unlockEnvelopeUpdateCommand("/t", Object.assign({ slot: "0123456789abcdef" }, ACCOUNT), { kind: "delete" })[2]
+    .includes("'unlock_envelope@0123456789abcdef'")
+    && !Model.unlockEnvelopeUpdateCommand("/t", ACCOUNT, { kind: "delete" })[2].includes("@"), "")
 check("the startup repair refuses a relative plugin directory",
   refused(Model.keyringRepairCommand("plugin", [])), "")
 check("and looks only at well-formed slots, once each",

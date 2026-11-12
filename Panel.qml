@@ -261,6 +261,21 @@ Item {
     }
   }
 
+  // Ctrl+C (Control alone) with auto-type on: copy and arm the login Enter
+  // acts on -- the open item on the detail screen, the highlighted row of the
+  // list, which is the top suggestion (or the first item) when the panel
+  // opens. Through copyPasswordAndArm(), so after any re-prompt. True when it
+  // took the key: something was armed, or its prompt shown. The callers say
+  // where it may run (the catcher unblocked, a search box with no selection).
+  function armAutoTypeFromKey(event) {
+    if ((event.modifiers & ~Qt.KeypadModifier) !== Qt.ControlModifier || event.key !== Qt.Key_C) return false
+    if (!root.vault.autoTypeEnabled) return false
+    var onScreen = root.vault.currentScreen
+    var picked = onScreen === "detail" ? root.vault.detailItem
+      : (onScreen === "main" ? root.vault.getSelectedItem() : null)
+    return Boolean(picked) && root.vault.copyPasswordAndArm(picked)
+  }
+
   // The same guarantee for the unlock, item-form and Send secrets.
   function syncSensitiveFields() {
     syncLoginFields()
@@ -285,6 +300,11 @@ Item {
     return bar ? bar.urgent : DmsColor.urgent
   }
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
+
+  // A sync the user asked for, or took over by asking during an automatic
+  // one (syncVault()). An automatic sync that succeeds says nothing, so the
+  // header stays quiet and the sync button stays usable while one runs.
+  readonly property bool userSyncing: root.vault.isSyncing && !root.vault.backgroundSync
 
   // -------------------------------------------------------------------------
   // Vault host
@@ -649,6 +669,15 @@ Item {
           return
         }
 
+        // With auto-type on, Ctrl+C arms the highlighted login
+        // (armAutoTypeFromKey()). Only while the catcher has the keys: in a
+        // field it stays the field's own copy, except in the search box,
+        // which arms from its own handler. Anything else falls through.
+        if (!keyCatcher.blocked && root.armAutoTypeFromKey(event)) {
+          event.accepted = true
+          return
+        }
+
         if (event.modifiers & ~Qt.KeypadModifier) return
         if (!t || root.vault.currentScreen !== "main") return
         if (root.vault.openFilterGroup !== "") return
@@ -822,7 +851,7 @@ Item {
           detail: root.vault.status === "unlocked" ? root.vault.filteredItems.length + Tr.text(" items") : ""
           meta: {
             if (root.vault.status === "unlocked") {
-              if (root.vault.isSyncing) return Tr.text("Syncing...")
+              if (root.userSyncing) return Tr.text("Syncing...")
               if (root.vault.isLoading && root.vault.items.length === 0) return Tr.text("Loading items...")
               return root.vault.userEmail
             }
@@ -898,13 +927,13 @@ Item {
             visible: root.vault.status === "unlocked"
             text: Tr.text("Sync")
             iconText: "󰑐"
-            iconSpinning: root.vault.isSyncing
+            iconSpinning: root.userSyncing
             tooltipText: Tr.text("Sync vault (r)")
             fontFamily: root.fontFamily
             fontSize: Style.font.caption
             iconSize: Style.font.body
             verticalPadding: Style.space(6)
-            enabled: !root.vault.isSyncing
+            enabled: !root.userSyncing
             onClicked: root.vault.syncVault()
           }
           Button {
@@ -2200,6 +2229,7 @@ Item {
             model: Model.applicableDependencies(root.vault.dependencies)
 
             delegate: BorderSurface {
+              id: depCard
               required property var modelData
               width: parent.width
               implicitHeight: depRow.implicitHeight + Style.space(16)
@@ -2268,6 +2298,19 @@ Item {
                     wrapMode: Text.WordWrap
                   }
 
+                  // Auto-type needs a key as well as wtype; registering one
+                  // is under its setting.
+                  Text {
+                    textFormat: Text.PlainText
+                    visible: depCard.modelData.key === "wtype" && root.vault.autoTypeKeybind.setupNote !== ""
+                    width: parent.width
+                    text: root.vault.autoTypeKeybind.setupNote
+                    color: root.vault.autoTypeKeybind.bound ? root.dim : root.urgent
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    wrapMode: Text.WordWrap
+                  }
+
                   // A setup row needs more than the package (an enrolled
                   // finger, the PAM stack); only the setup command does that.
                   Text {
@@ -2290,7 +2333,7 @@ Item {
                   iconText: modelData.setup ? "󰈷" : "󰐕"
                   tooltipText: modelData.setup
                     ? "fprintd-enroll"
-                    : "Install packages: " + modelData.pkg
+                    : root.vault.installHint([modelData.pkg])
                   fontFamily: root.fontFamily
                   fontSize: Style.font.caption
                   onClicked: root.vault.installOne(modelData)
@@ -2318,7 +2361,7 @@ Item {
               iconText: "󰐕"
               selected: true
               accent: DmsColor.accent
-              tooltipText: "Install packages: " + root.vault.installablePackages.join(" ")
+              tooltipText: root.vault.installHint(root.vault.installablePackages)
               fontFamily: root.fontFamily
               fontSize: Style.font.bodySmall
               onClicked: root.vault.installMissing()
@@ -2446,6 +2489,7 @@ Item {
               model: root.vault.settingsEntries
 
               delegate: Column {
+                id: settingDelegate
                 required property var modelData
                 required property int index
                 width: parent.width
@@ -2574,7 +2618,7 @@ Item {
                           else root.vault.beginFidoSetup()
                           return
                         }
-                        root.vault.writeSetting(modelData.key, !checked, "bool")
+                        root.vault.toggleBoolSetting(modelData)
                       }
                     }
 
@@ -2610,6 +2654,16 @@ Item {
                   color: root.urgent
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
+                }
+
+                // The key that runs auto-type, under its setting while it is
+                // on (AutoTypeKeybind.qml).
+                Loader {
+                  width: parent.width
+                  active: !settingDelegate.isGroup && settingDelegate.modelData.key === "autoTypeEnabled"
+                    && root.vault.autoTypeEnabled
+                  visible: active
+                  sourceComponent: AutoTypeKeybind { panel: root; vault: root.vault }
                 }
 
                 PanelSeparator { width: parent.width }
@@ -3375,8 +3429,16 @@ Item {
                 root.vault.closeFilterGroup()
                 root.vault.scheduleFilterRebuild()
               }
-              // Alt+letter runs the same shortcuts without leaving the box.
               Keys.onPressed: function(event) {
+                // Ctrl+C arms the highlighted login from here, as Enter copies
+                // it: the box has focus when the panel opens, and the catcher's
+                // Ctrl+C never sees a key while it does. Only with nothing
+                // selected; a selection's Ctrl+C is the box's own copy.
+                if (searchField.selectedText === "" && root.armAutoTypeFromKey(event)) {
+                  event.accepted = true
+                  return
+                }
+                // Alt+letter runs the same shortcuts without leaving the box.
                 if (!(event.modifiers & Qt.AltModifier)) return
                 if (!event.text) return
                 if (root.vault.runAltShortcut(String(event.text).toLowerCase())) {
@@ -3689,6 +3751,15 @@ Item {
                       tooltipText: Tr.text("Copy password (Enter / y)")
                       fontFamily: root.fontFamily
                       onClicked: root.smartEnter(itemData)
+                    }
+
+                    // Re-prompt first, inside copyPasswordAndArm().
+                    PanelActionButton {
+                      visible: root.vault.autoTypeEnabled && Model.isLoginItem(itemRow.itemData) && itemRow.itemData.hasPassword
+                      iconText: ""
+                      tooltipText: "Copy password and arm auto-type (Ctrl+C)"
+                      fontFamily: root.fontFamily
+                      onClicked: root.vault.copyPasswordAndArm(itemRow.itemData)
                     }
 
                     PanelActionButton {
@@ -4897,6 +4968,14 @@ Item {
               width: editFlickable.width - root.scrollGutter
               spacing: Style.space(10)
 
+              // Enter's save, with the Save button's guards. A form field's
+              // Return lands here (LineField.submitsForm), so the next field
+              // added saves without wiring of its own.
+              function submitForm() {
+                if (root.vault.activeScreen !== "edit" || root.vault.formPicker !== "" || root.vault.isLoading) return
+                root.vault.saveItemForm()
+              }
+
               // Item Type Selector (only for new items)
               Row {
                 visible: !root.vault.formIsEditing
@@ -5025,6 +5104,8 @@ Item {
                     placeholderText: Tr.text("New folder name...")
                     text: root.vault.newFolderName
                     onTextChanged: root.vault.newFolderName = text
+                    // Enter adds the folder; it does not save the item.
+                    submitsForm: false
                     onAccepted: root.vault.submitNewFolder()
                     enabled: !root.vault.creatingFolder
                   }
@@ -5603,12 +5684,14 @@ Item {
                 }
               }
 
-              // Enter saves from anywhere in the form (one Shortcut rather than
-              // onAccepted on 30+ fields), except while a picker has it.
+              // Enter saves from anywhere in the form, except while a picker
+              // has it. An editable text field claims Return before any
+              // Shortcut and calls submitForm() itself; this covers the rest
+              // (a masked field, or focus on no field).
               Shortcut {
                 sequences: ["Return", "Enter"]
-                enabled: root.vault.activeScreen === "edit" && root.vault.formPicker === ""
-                onActivated: root.vault.saveItemForm()
+                enabled: root.vault.activeScreen === "edit" && root.vault.formPicker === "" && !root.vault.isLoading
+                onActivated: editFormCol.submitForm()
               }
 
               // Save Action Button

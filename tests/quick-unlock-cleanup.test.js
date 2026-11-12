@@ -28,6 +28,8 @@ function vault() {
     heldPinName: "", pinEntry: "", pendingPinForMigration: "", session: "", readEpochs: {},
     forgotten: [], unlocks: [], refreshes: 0, activeSlot: "default", vaultEpoch: 4,
     logoutPending: false, allCredentialsClearPending: false,
+    loginSubmitted: false, unlockSubmitted: false, statusRecheckAfterUnlock: false, statusChecks: 0,
+    runStatusCheck() { this.statusChecks++ }, pinUnlockError: "", fingerprintError: "", fingerprintMessage: "",
     envelopeJobs: [], envelopeJob: null, envelopeProc: { running: false, outputHeld: true },
     envelopeStdout: { text: "" }, seq: 0,
     newHeldName() { return "pw" + (++this.seq) },
@@ -43,6 +45,8 @@ function vault() {
     quickUnlockEnableGraceMs: 60000, reconciledMethods: {},
     quickUnlockPurgeAttempts: {}, quickUnlockPurgePending: {}, quickUnlockPurgeMaxAttempts: 3,
     quickUnlockPurgeFailures: {}, errorMessage: "",
+    autoSyncError: /readonly property string autoSyncError: "([^"]+)"/.exec(service)[1],
+    lastSyncAttemptAt: 0, backgroundSync: false, autoSyncReloadPending: false,
     quickUnlockMethodGeneration: {}, quickUnlockAccountGeneration: {}, pendingPurges: [],
     settings: { pinUnlock: false, fingerprintUnlock: true, fidoUnlock: true },
     envelopeTool() { return "/synthetic/tool" },
@@ -51,7 +55,8 @@ function vault() {
   v.root = v
   bind(v, service, ["forgetHeldPassword", "onEnvelopePinResult", "onPinUnlockResult",
     "onFingerprintPasswordRetrieved", "queueEnvelopeJob", "pumpEnvelopeJobs", "onEnvelopeJobExited",
-    "dropVaultState", "quickUnlockSettingOff", "reconcileDisabledMethods", "openEnvelopeForFingerprint", "noteQuickUnlockEnabled", "dropEnvelopeState"])
+    "dropVaultState", "authAttemptInFlight", "unlockJobInFlight", "envelopeUnlockJobPending",
+    "recheckStatusAfterUnlock", "onPinJobDropped", "quickUnlockSettingOff", "reconcileDisabledMethods", "openEnvelopeForFingerprint", "noteQuickUnlockEnabled", "dropEnvelopeState"])
   // Optional additions are exercised through their existing callers.
   for (const name of ["cancelEnvelopeUnlockJobs", "onQuickUnlockPurgeDone", "queueQuickUnlockPurge", "reportQuickUnlockPurgeFailure"]) {
     if (functionBody(service, name)) bind(v, service, [name])
@@ -79,6 +84,24 @@ function vault() {
   v.onPinUnlockResult(0, Model.heldSecretRef(capture.slice(7)))
   check("abandoned legacy answer is forgotten", v.forgotten.includes(capture.slice(7)))
   eq("legacy exit releases busy state", v.pinBusy, false)
+}
+// A status held back during a legacy PIN run is re-run on every exit that
+// does not hand off to a typed unlock, including a wrong PIN.
+for (const [label, code, out] of [["wrong PIN", 1, ""], ["empty output", 0, ""]]) {
+  const v = vault()
+  Object.assign(v, { sshAuthSurfaceActive: true, pinBusy: true, pinMaxAttempts: 5,
+    statusRecheckAfterUnlock: true, runStatusCheck: () => { v.statusChecks++ } })
+  v.onPinUnlockResult(code, out)
+  eq(`legacy ${label}: held status is re-run`, v.statusChecks, 1)
+  eq(`legacy ${label}: recheck flag cleared`, v.statusRecheckAfterUnlock, false)
+  eq(`legacy ${label}: no unlock started`, v.unlocks.length, 0)
+}
+{
+  const v = vault()
+  Object.assign(v, { sshAuthSurfaceActive: true, statusRecheckAfterUnlock: true,
+    runStatusCheck: () => { v.statusChecks++ } })
+  v.onPinUnlockResult(0, Model.heldSecretRef("pwx"))
+  eq("legacy accepted PIN hands off without a status recheck", v.statusChecks, 0)
 }
 // VaultProcess keeps its runId after a kill request; only finish releases it.
 // Exercise the real cancellation/result paths while its helper exit is delayed.
@@ -182,6 +205,39 @@ for (const method of ["envelope PIN", "legacy PIN", "fingerprint", "FIDO2"]) {
     eq(`${method}, ${active ? "live" : "abandoned"}: held password ownership`,
       v.forgotten.includes("late-master"), !active)
   }
+}
+// A typed or FIDO unlock bumps the epoch while a PIN open and a fingerprint
+// open are both pending. Each dropped job cleans up its own method's state
+// (another method's job must not hold it back), and the last cleanup to run
+// releases the held status recheck.
+for (const order of ["running PIN job exits first", "queued PIN job dropped last"]) {
+  const v = vault()
+  Object.assign(v, { sshAuthSurfaceActive: true, pinReady: true, isUnlocking: false,
+    pinBusy: false, pinAttempts: 0, pinMaxAttempts: 5, pinEntry: "123456",
+    envelopeSummary: { pin: true }, pendingUnlockPassword: "", cancelAuthPrewarm() {},
+    syncLoginFieldsToState() {}, clearLoginAttempt() {}, statusRecheckAfterUnlock: true,
+    runStatusCheck() { v.statusChecks++ } })
+  bind(v, service, ["submitPinUnlock"])
+  if (order.startsWith("running")) {
+    v.submitPinUnlock()
+    v.openEnvelopeForFingerprint()
+  } else {
+    v.envelopeProc.running = true // blocks both until released
+    v.submitPinUnlock()
+    v.openEnvelopeForFingerprint()
+    v.envelopeProc.running = false
+  }
+  v.vaultEpoch++ // onUnlockSuccess()
+  if (order.startsWith("running")) {
+    v.envelopeProc.running = false
+    v.onEnvelopeJobExited(0)
+  }
+  v.pumpEnvelopeJobs()
+  v.pumpEnvelopeJobs()
+  eq(`${order}: PIN submit marker cleared`, v.pinUnlockSubmitted, false)
+  eq(`${order}: PIN busy cleared`, v.pinBusy, false)
+  eq(`${order}: fingerprint authorization cleared`, v.fingerprintAuthorized, false)
+  eq(`${order}: held status recheck ran`, v.statusChecks, 1)
 }
 for (const invalidate of ["lock", "account switch", "epoch change"]) {
   const v = vault()
@@ -340,6 +396,35 @@ for (const code of [0, 1]) for (const priorAttempts of [0, 2]) {
   check(`return at attempt ${priorAttempts} after completion ${code}: obsolete completion cannot settle replacement`,
     v.quickUnlockPurgePending[key] === v.envelopeJob, "")
 }
+// Forgetting fingerprint unlock on the settings screen deletes the account's
+// envelope (its wrap holds the data key in the clear) rather than removing
+// the wrap, and the write's completion re-reads the summary, so the PIN and
+// key rows read off. An envelope without the wrap is left alone.
+for (const [label, summary, wantDelete, wantNote] of [
+  ["fingerprint with a PIN", { fingerprint: true, pin: { m: 1 }, fido: [] }, true, /stored password was deleted, so set up PIN or security-key unlock again/],
+  ["fingerprint with a key", { fingerprint: true, pin: null, fido: [{ cred: "c" }] }, true, /stored password was deleted/],
+  ["fingerprint alone", { fingerprint: true, pin: null, fido: [] }, true, /^Fingerprint unlock forgotten$/],
+  ["no fingerprint wrap", { fingerprint: false, pin: { m: 1 }, fido: [] }, false, /^Fingerprint unlock forgotten$/],
+  ["no envelope", null, false, /^Fingerprint unlock forgotten$/]]) {
+  const v = vault()
+  Object.assign(v, { envelopeSummary: summary, legacyFingerprintStored: true, fingerprintStored: true, flashes: [],
+    cleared: 0, requestMasterCredentialClear() { this.cleared++ }, flashNotification(msg) { this.flashes.push(msg) } })
+  bind(v, service, ["forgetFingerprintUnlock", "removeQuickUnlockMethod", "writeEnvelope"])
+  if (functionBody(service, "fingerprintForgottenText")) bind(v, service, ["fingerprintForgottenText"])
+  v.forgetFingerprintUnlock()
+  const expected = Model.unlockEnvelopeUpdateCommand("/synthetic/tool", v.envelopeAccount(), { kind: "delete" })
+  eq(`forget ${label}: the envelope entry is deleted`,
+    v.envelopeJob ? JSON.stringify(v.envelopeJob.command) : null, wantDelete ? JSON.stringify(expected) : null)
+  eq(`forget ${label}: the legacy entry goes too`, v.cleared, 1)
+  eq(`forget ${label}: fingerprint reads off at once`, v.fingerprintStored && v.legacyFingerprintStored, false)
+  check(`forget ${label}: the notice says what went`, v.flashes.length === 1 && wantNote.test(v.flashes[0]), JSON.stringify(v.flashes))
+  if (wantDelete) {
+    check(`forget ${label}: the delete is an envelope write with no secret`,
+      v.envelopeJob.writes === true && Object.keys(v.envelopeProc.environment).every(k => /^QSBW_(ACCOUNT_ID|SERVER)$/.test(k)), "")
+    v.envelopeProc.running = false; v.onEnvelopeJobExited(0)
+    eq(`forget ${label}: the summary is re-read once it lands`, v.refreshes, 1)
+  }
+}
 // Execute the real purge builder with a synthetic keyring executable. The
 // real secret-tool is unreachable even if the tested script is incorrect.
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "qsbw-purge-regression-"))
@@ -371,15 +456,19 @@ esac
   fs.writeFileSync(tool, `#!/bin/bash
 case "$1" in
  inspect) cat;;
- remove) jq '.pin = null';;
+ remove) echo "remove $3" >> "\${SYNTHETIC_CALLS:-/dev/null}"; jq '.pin = null';;
  verify) cat >/dev/null;;
  *) exit 2;;
 esac
 `, { mode: 0o755 })
-  // Store is intercepted too; no fallback to a real keyring executable.
+  // Store is intercepted too; no fallback to a real keyring executable. A
+  // clear of the envelope entry itself answers ENVELOPE_CLEAR_CASE and is
+  // logged; the legacy entry's clear keeps answering PURGE_CASE.
   const stub = path.join(scratch, "secret-tool")
   fs.writeFileSync(stub, fs.readFileSync(stub, "utf8").replace(' clear)',
-    ' store) cat > "$SYNTHETIC_ENVELOPE";;\n clear)'))
+    ' store) cat > "$SYNTHETIC_ENVELOPE";;\n clear) [ "$5" = unlock_envelope ] && { echo clear >> "\${SYNTHETIC_CALLS:-/dev/null}";'
+    + ' case "$ENVELOPE_CLEAR_CASE" in present) rm -f "$SYNTHETIC_ENVELOPE"; exit 0;; absent) exit 1;;'
+    + ' failed) echo "synthetic service unavailable" >&2; exit 1;; newline-error) printf "\\n" >&2; exit 1;; killed) kill -KILL $$$$;; esac; };'))  // $$$$: replace() reads $$ as one $
   const envelope = path.join(scratch, "envelope")
   const initial = JSON.stringify({ account: { id: "synthetic", server: "https://synthetic.invalid" }, pin: { wrap: "synthetic" } })
   for (const legacy of ["present", "absent"]) {
@@ -395,6 +484,51 @@ esac
         JSON.parse(fs.readFileSync(envelope, "utf8")).pin !== null, kind !== "present")
     }
   }
+  // The fingerprint wrap holds the data key in the clear, so its purge deletes
+  // the envelope entry instead of storing one without the wrap; an envelope
+  // with no fingerprint wrap is left as it is.
+  const calls = path.join(scratch, "calls")
+  const account = { id: "synthetic", server: "https://synthetic.invalid" }
+  const withFingerprint = JSON.stringify({ account, fingerprint: true, pin: { wrap: "synthetic" }, fido: [] })
+  const withoutFingerprint = JSON.stringify({ account, fingerprint: false, pin: { wrap: "synthetic" }, fido: [] })
+  const purge = (method, summary, clearCase, legacy) => {
+    fs.writeFileSync(envelope, summary)
+    fs.rmSync(calls, { force: true })
+    const command = Model.quickUnlockPurgeCommand(tool, ["default"], method)
+    const r = spawnSync(command[0], command.slice(1), { encoding: "utf8", timeout: 5000,
+      env: { PATH: `${scratch}:/usr/bin:/bin`, HOME: scratch, LOOKUP_CASE: "present", PURGE_CASE: legacy,
+        ENVELOPE_CLEAR_CASE: clearCase, SYNTHETIC_ENVELOPE: envelope, SYNTHETIC_CALLS: calls } })
+    return { status: r.status, kept: fs.existsSync(envelope) ? JSON.parse(fs.readFileSync(envelope, "utf8")) : null,
+      calls: fs.existsSync(calls) ? fs.readFileSync(calls, "utf8").trim().split("\n").join(",") : "" }
+  }
+  for (const legacy of ["present", "absent"]) {
+    const r = purge("fingerprint", withFingerprint, "present", legacy)
+    eq(`fingerprint purge, legacy ${legacy}: succeeds`, r.status, 0)
+    eq(`fingerprint purge, legacy ${legacy}: the envelope entry is cleared, not stored again`, r.kept, null)
+    eq(`fingerprint purge, legacy ${legacy}: the wrap is never removed on its own`, r.calls, "clear")
+  }
+  {
+    const r = purge("fingerprint", withoutFingerprint, "present", "present")
+    eq("no fingerprint wrap: the purge succeeds", r.status, 0)
+    check("no fingerprint wrap: the envelope and its PIN are left alone",
+      r.kept !== null && r.kept.pin !== null && r.calls === "", JSON.stringify(r))
+  }
+  {
+    const r = purge("pin", withFingerprint, "present", "present")
+    eq("a PIN purge beside a fingerprint wrap still removes only the PIN", r.status, 0)
+    check("and stores the envelope again with the fingerprint wrap kept",
+      r.kept !== null && r.kept.pin === null && r.kept.fingerprint === true && r.calls === "remove pin", JSON.stringify(r))
+  }
+  for (const [clearCase, ok] of [["absent", true], ["failed", false], ["newline-error", false], ["killed", false]]) {
+    const r = purge("fingerprint", withFingerprint, clearCase, "present")
+    eq(`fingerprint purge, envelope clear ${clearCase}: success disposition`, r.status === 0, ok)
+    check(`fingerprint purge, envelope clear ${clearCase}: nothing was stored`,
+      r.kept !== null && r.kept.fingerprint === true && r.calls === "clear", JSON.stringify(r))
+  }
+  const legacyName = Model.keyringEntryName(Model.LEGACY_ENTRY_FOR_METHOD.fingerprint, "default")
+  check("the fingerprint purge still clears the legacy plaintext entry",
+    Model.quickUnlockPurgeCommand(tool, ["default"], "fingerprint")[2].includes("secret-tool clear service 'qs-bitwarden-cli' account '" + legacyName + "'"),
+    legacyName)
 
 } finally { fs.rmSync(scratch, { recursive: true, force: true }) }
 done()
