@@ -7497,6 +7497,7 @@ function settingWriteValue(key, value) {
     }
     return methods
   }
+  if (key === "generatorOptions") return generatorOptionsToStore(restoreGeneratorOptions(value))
   var entry = settingSchemaEntry(key)
   if (!entry) return undefined
   return entry.type === "bool" ? boolSetting(key, value) : entry.type === "int" ? intSetting(key, value) : undefined

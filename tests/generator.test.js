@@ -100,9 +100,10 @@ check("only the option keys are saved, never a generated value",
   Object.keys(stored).every(k => k in Model.generatorDefaults())
     && !/Tr0ub4dor|hunter2/.test(JSON.stringify(stored)),
   JSON.stringify(stored))
-check("the saved options reach shell.json as JSON",
-  Model.settingWriteCommand("generatorOptions", stored, "json")[2].includes("--json"),
-  Model.settingWriteCommand("generatorOptions", stored, "json")[2])
+check("the saved options reach the DMS settings as the validated object",
+  same(Model.settingWriteValue("generatorOptions", stored), stored)
+    && same(Model.settingWriteValue("generatorOptions", { length: "abc" }), Model.generatorOptionsToStore({})),
+  JSON.stringify(Model.settingWriteValue("generatorOptions", stored)))
 
 check("a partial save keeps the defaults for the rest",
   same(restore({ length: 32 }), Model.normalizeGeneratorOptions({ length: 32 })),
@@ -166,23 +167,11 @@ check("closing the generator saves a change still waiting",
   bodyOf("closeGenerator"))
 check("the save writes only the options, quietly",
   /Model\.generatorOptionsToStore\(genOpts\)/.test(saveBody)
-    && /Model\.settingWriteCommand\("generatorOptions",[^)]*"json"\)/.test(saveBody)
+    && /writeSettingQuietly\("generatorOptions", stored, "json"\)/.test(saveBody)
     && !/genValue|settingsFlash|console\./.test(saveBody),
   saveBody)
 check("an unchanged option set is not written again",
   /===\s*genOptsSaved\)\s*return/.test(saveBody), saveBody)
-check("a change made while a save runs is written after it",
-  /genOptsWriteProc\.running[\s\S]*genOptsWritePending\s*=\s*true/.test(saveBody)
-    && /genOptsWritePending[\s\S]*saveGeneratorOptions\(\)/.test(
-      panelSrc.slice(panelSrc.indexOf("id: genOptsWriteProc"), panelSrc.indexOf("id: genOptsWriteProc") + 900)),
-  saveBody)
-const writeProcBlock = panelSrc.slice(panelSrc.indexOf("id: genOptsWriteProc"),
-  panelSrc.indexOf("id: genOptsSaveTimer"))
-check("a failed save is retried once, not forever, and each change allows one more",
-  /exitCode\s*!==\s*0[\s\S]*genOptsRetries\s*<\s*1[\s\S]*genOptsRetries\+\+[\s\S]*genOptsSaveTimer\.restart\(\)/.test(writeProcBlock)
-    && /genOptsRetries\s*=\s*0/.test(bodyOf("setGenOpt")),
-  writeProcBlock + "\n" + bodyOf("setGenOpt"))
-
 
 // --- the same options over `bw serve` ---------------------------------------
 // `bw serve` URLs, verified against a live locked `bw serve`.
