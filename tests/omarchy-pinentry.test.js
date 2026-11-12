@@ -43,7 +43,8 @@ const what = fs.readFileSync(process.env.FAKE_UI_ANSWER, "utf8")
 const core = (fs.readFileSync("/proc/self/limits", "utf8").match(/^Max core file size\\s+(\\S+)\\s+(\\S+)/m) || []).slice(1).join("/")
 fs.appendFileSync(process.env.FAKE_UI_LOG, JSON.stringify({ ask, argv: process.argv.slice(1), pid: process.pid,
   dirMode: fs.statSync(dir).mode & 0o777, fileMode: fs.statSync(path.join(dir, "prompt.json")).mode & 0o777,
-  dir, core, crashHandler: process.env.QS_DISABLE_CRASH_HANDLER || "", desc: process.env.QSBW_PE_DESC || "" }) + "\\n")
+  dir, core, crashHandler: process.env.QS_DISABLE_CRASH_HANDLER || "", desc: process.env.QSBW_PE_DESC || "",
+  theme: process.env.QSBW_PE_THEME || "" }) + "\\n")
 if (what === "crash") process.exit(3)
 const s = net.connect(path.join(dir, "answer.sock"), () => {
   if (what.startsWith("answer:")) s.end("D " + encodeURIComponent(what.slice(7)) + "\\n")
@@ -276,12 +277,32 @@ function checks() {
   const noUi = Object.assign({}, baseEnv, { QSBW_PINENTRY_TEST_UI: "", WAYLAND_DISPLAY: "" })
   const c = spawnSync(frontend, ["--check"], { env: noUi, encoding: "utf8" })
   check("--check fails without a Wayland display, and says why", c.status === 1 && /Wayland/.test(c.stderr), c.stderr)
-  const noKit = Object.assign({}, baseEnv, { QSBW_PINENTRY_TEST_UI: "", WAYLAND_DISPLAY: "wayland-x", OMARCHY_SHELL_DIR: path.join(scratch, "nokit") })
-  eq("--check fails without the shell kit", spawnSync(frontend, ["--check"], { env: noKit }).status, 1)
+  {
+    // A copy of the frontend beside no DmsUi, with a quickshell on PATH.
+    const plugin = path.join(scratch, "partial")
+    fs.mkdirSync(path.join(plugin, "pinentry", "Common"), { recursive: true })
+    for (const f of ["omarchy-pinentry", "PinentryPrompt.qml", "Common/Theme.qml"]) {
+      fs.copyFileSync(path.join(repoRoot, "pinentry", f), path.join(plugin, "pinentry", f))
+    }
+    fs.chmodSync(path.join(plugin, "pinentry", "omarchy-pinentry"), 0o755)
+    fs.copyFileSync(path.join(repoRoot, "LineField.qml"), path.join(plugin, "LineField.qml"))
+    const qsBin = path.join(scratch, "qs-bin")
+    fs.mkdirSync(qsBin)
+    fs.writeFileSync(path.join(qsBin, "quickshell"), "#!/bin/sh\nexit 0\n", { mode: 0o755 })
+    const env = Object.assign({}, baseEnv, { QSBW_PINENTRY_TEST_UI: "", WAYLAND_DISPLAY: "wayland-x",
+      PATH: qsBin + ":" + process.env.PATH })
+    const c = spawnSync(path.join(plugin, "pinentry", "omarchy-pinentry"), ["--check"], { env, encoding: "utf8" })
+    check("--check fails without the panel's DmsUi, and says why", c.status === 1 && /DmsUi/.test(c.stderr), c.stderr)
+  }
   // The card's field is the panel's LineField, never an editable TextInput
-  // (tests/line-field.test.js), so the prompt's config links it beside the kit.
+  // (tests/line-field.test.js), so the prompt's config links it.
   const src = fs.readFileSync(frontend, "utf8")
   const card = fs.readFileSync(path.join(repoRoot, "pinentry", "PinentryCard.qml"), "utf8")
+  const window = fs.readFileSync(path.join(repoRoot, "pinentry", "PinentryPrompt.qml"), "utf8")
+  check("the prompt imports nothing from Omarchy or Hyprland, so it loads on niri",
+    !/qs\.Commons|qs\.Ui|Quickshell\.Hyprland/.test(card + window) && /import "\.\.\/DmsUi"/.test(card)
+      && /want\("DmsUi", path\.join\(path\.dirname\(here\), "DmsUi"\)\)/.test(src)
+      && /want\("Common", path\.join\(here, "Common"\)\)/.test(src), "")
   check("the prompt's field is the panel's LineField",
     /import "\.\."/.test(card) && /LineField \{[\s\S]*?password: !root\.revealed/.test(card)
       && /want\("LineField\.qml", path\.join\(path\.dirname\(here\), "LineField\.qml"\)\)/.test(src)
@@ -294,12 +315,12 @@ function checks() {
 // --- through the panel's pinentry script -------------------------------------------------------
 
 const exits = Model.pinentryExitCodes()
-function script(answer, opts = {}, program = frontend) {
+function script(answer, opts = {}, program = frontend, theme) {
   fs.writeFileSync(answerFile, answer)
   fs.writeFileSync(uiLog, "")
   const argv = Model.pinentryCommand(program, Object.assign({ title: "Bitwarden", prompt: "PIN:" }, opts))
   const r = spawnSync(argv[0], argv.slice(1), { encoding: "utf8", timeout: 20000,
-    env: Object.assign({}, baseEnv, Model.pinentryEnvironment(opts)) })
+    env: Object.assign({}, baseEnv, Model.pinentryEnvironment(opts, theme)) })
   return { code: r.status, out: r.stdout, starts: uiStarts() }
 }
 
@@ -319,6 +340,9 @@ function throughScript() {
   s = script("cancel", { description: "Unlock Bitwarden for you@example.com", error: "Wrong PIN" })
   eq("the description reaches the prompt from the environment",
     s.starts[0] && `${s.starts[0].ask.description}|${s.starts[0].ask.error}`, "Unlock Bitwarden for you@example.com|Wrong PIN")
+  s = script("cancel", {}, frontend, { primary: "#112233", fontSizeMedium: 15, isLightMode: true, unknown: "x" })
+  eq("the DMS theme reaches the prompt, only the keys it reads",
+    s.starts[0] && s.starts[0].theme, JSON.stringify({ isLightMode: true, primary: "#112233", fontSizeMedium: 15 }))
   // The script asks SETTIMEOUT 120 itself; the stand-in prompt here hangs, so
   // the frontend's own timeout must be what ends it: shorten it by wrapping.
   const wrapped = path.join(scratch, "short-timeout")
@@ -371,19 +395,10 @@ function only() {
   eq("the frontend runs and answers, the probe finds it", ran(), "0|y||1|found")
   eq("unable to run (no runtime dir): missing, and no other pinentry runs",
     ran({ XDG_RUNTIME_DIR: "" }), missing)
-  eq("unable to run (no display, no kit): missing, and no other pinentry runs",
-    ran({ QSBW_PINENTRY_TEST_UI: "", WAYLAND_DISPLAY: "", OMARCHY_SHELL_DIR: path.join(scratch, "nokit") }), missing)
-  eq("no display alone: missing", ran({ QSBW_PINENTRY_TEST_UI: "", WAYLAND_DISPLAY: "" }), missing)
-  {
-    // quickshell missing: a display and the kit are not enough.
-    const kit = path.join(scratch, "kit")
-    for (const d of ["Commons", "Ui"]) {
-      fs.mkdirSync(path.join(kit, d), { recursive: true })
-      fs.writeFileSync(path.join(kit, d, "qmldir"), "")
-    }
-    eq("no quickshell: missing",
-      ran({ QSBW_PINENTRY_TEST_UI: "", WAYLAND_DISPLAY: "wayland-test", OMARCHY_SHELL_DIR: kit }), missing)
-  }
+  eq("unable to run (no display): missing, and no other pinentry runs",
+    ran({ QSBW_PINENTRY_TEST_UI: "", WAYLAND_DISPLAY: "" }), missing)
+  // quickshell missing: a display is not enough.
+  eq("no quickshell: missing", ran({ QSBW_PINENTRY_TEST_UI: "", WAYLAND_DISPLAY: "wayland-test" }), missing)
   // node missing: `env node` fails, so --check does.
   const noNode = fs.mkdtempSync(path.join(scratch, "bin-"))
   for (const n of fs.readdirSync(bin)) if (n !== "node") fs.symlinkSync(fs.realpathSync(path.join(bin, n)), path.join(noNode, n))

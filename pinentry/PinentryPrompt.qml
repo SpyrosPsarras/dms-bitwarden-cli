@@ -2,9 +2,6 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
-import Quickshell.Hyprland
-import qs.Commons
-import qs.Commons as Commons
 
 // The window of the plugin's pinentry: one prompt, in a Quickshell of
 // its own that omarchy-pinentry starts for a GETPIN and that quits once it
@@ -32,19 +29,15 @@ Scope {
   property bool finished: false
   property bool wasConnected: false
 
-  // The monitor focused when the prompt was asked for, else the one focused
-  // now, else the first.
+  // The monitor focused when the prompt was asked for, else none, which
+  // leaves the choice to the compositor (niri takes the focused output).
   readonly property var targetScreen: {
+    var wanted = root.ask ? String(root.ask.monitor || "") : ""
     var screens = Quickshell.screens
-    var wanted = [root.ask ? String(root.ask.monitor || "") : "",
-                  Hyprland.focusedMonitor ? String(Hyprland.focusedMonitor.name || "") : ""]
-    for (var w = 0; w < wanted.length; w++) {
-      if (!wanted[w]) continue
-      for (var i = 0; i < screens.length; i++) {
-        if (screens[i].name === wanted[w]) return screens[i]
-      }
+    for (var i = 0; wanted && i < screens.length; i++) {
+      if (screens[i].name === wanted) return screens[i]
     }
-    return screens.length > 0 ? screens[0] : null
+    return null
   }
 
   function finish(line) {
@@ -97,46 +90,6 @@ Scope {
     running: root.ask !== null && Number(root.ask.timeout) > 0
     interval: (Number(root.ask ? root.ask.timeout : 0) + 15) * 1000
     onTriggered: root.finish("")
-  }
-
-  // A theme applied while the prompt is open. The shell hears of it over IPC,
-  // which reaches only the shell, so the theme's files are read again here.
-  property string lastColors: ""
-  property string lastShell: ""
-  FileView {
-    id: themeColors
-    path: Commons.Color.currentThemePath + "/colors.toml"
-    printErrors: false
-    onLoaded: {
-      var raw = text()
-      if (root.lastColors !== "" && raw !== root.lastColors) {
-        Commons.Color.loadColors(raw)
-        Style.scheduleRefresh()
-      }
-      root.lastColors = raw
-    }
-  }
-  FileView {
-    id: themeShell
-    path: Commons.Color.currentThemePath + "/shell.toml"
-    printErrors: false
-    onLoaded: {
-      var raw = text()
-      if (root.lastShell !== "" && raw !== root.lastShell) {
-        Commons.Color.loadShell(raw)
-        Style.scheduleRefresh()
-      }
-      root.lastShell = raw
-    }
-  }
-  Timer {
-    running: !root.finished
-    repeat: true
-    interval: 1000
-    onTriggered: {
-      themeColors.reload()
-      themeShell.reload()
-    }
   }
 
   PanelWindow {

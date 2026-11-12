@@ -2387,7 +2387,7 @@ function pinUnlockCommand(slot) {
 // The pinentry is the plugin's own and nothing else: pinentry/omarchy-pinentry,
 // a Node Assuan server that draws its prompt as a card in a Quickshell of its
 // own, run by absolute path from the plugin's directory. Its `--check` says
-// whether it can show a prompt here (quickshell, the shell kit, a Wayland
+// whether it can show a prompt here (quickshell, the panel's DmsUi, a Wayland
 // display and a runtime dir); node missing fails it too. There is no other
 // program to fall back to: where it cannot run, the panel says so and offers
 // its own field (typedSecretEntry()).
@@ -2526,13 +2526,33 @@ function pinentryCommand(frontend, opts) {
     String(Math.max(0, Math.floor(Number(o.minLength) || 0)))]
 }
 
+// The DMS Theme values pinentry/Common/Theme.qml stands in for: the prompt
+// runs outside the shell and cannot read DMS's own.
+var PINENTRY_THEME_ENV = "QSBW_PE_THEME"
+var PINENTRY_THEME_KEYS = ["isLightMode", "surface", "surfaceText", "surfaceVariantText", "surfaceContainer",
+  "surfaceContainerHigh", "primary", "outline", "error", "fontFamily", "cornerRadius", "spacingS", "spacingM",
+  "spacingL", "fontSizeSmall", "fontSizeMedium", "fontSizeLarge", "fontSizeXLarge", "iconSize"]
+
+function pinentryTheme(theme) {
+  var out = {}
+  for (var i = 0; theme && i < PINENTRY_THEME_KEYS.length; i++) {
+    var key = PINENTRY_THEME_KEYS[i]
+    var value = theme[key]
+    if (typeof value === "boolean" || (typeof value === "number" && isFinite(value))) out[key] = value
+    else if (value !== undefined && value !== null) out[key] = pinentryText(String(value))
+  }
+  return out
+}
+
 // The environment pinentryCommand() reads its description and error from
-// (/proc/<pid>/cmdline is world-readable, and the description names the account).
-function pinentryEnvironment(opts) {
+// (/proc/<pid>/cmdline is world-readable, and the description names the account),
+// and the DMS theme the prompt draws with.
+function pinentryEnvironment(opts, theme) {
   var o = opts || {}
   var env = {}
   env[PINENTRY_DESC_ENV] = pinentryText(o.description)
   env[PINENTRY_ERR_ENV] = pinentryText(o.error)
+  if (theme) env[PINENTRY_THEME_ENV] = JSON.stringify(pinentryTheme(theme))
   return env
 }
 
@@ -7344,7 +7364,7 @@ var SETTINGS_SCHEMA = [
     action: "pin",
     description: "A PIN of 6 digits or more opens your master password, stored once, encrypted and sealed to this machine. A program running as you can copy it and try every 6-digit PIN in about 16 hours, so use 8 or more (about 2 months)." },
   { key: "usePinentry", group: "security", type: "bool", label: "Type secrets in a separate prompt", defaultValue: true,
-    description: "Type your master password and PIN into the plugin's own unlock prompt, a card over the focused monitor drawn like the shell's password prompt, instead of the panel, so they never enter the shell. It is a separate, short-lived process under the vault helper and needs quickshell, node and a Wayland display; while the helper is not running, the panel waits for it instead of offering its own field." },
+    description: "Type your master password and PIN into the plugin's own unlock prompt, a card over the focused monitor in the DMS theme, instead of the panel, so they never enter the shell. It is a separate, short-lived process under the vault helper and needs quickshell, node and a Wayland display; while the helper is not running, the panel waits for it instead of offering its own field." },
 
   { key: "sshAgentEnabled", group: "sshAgent", type: "bool", label: "Act as your SSH agent", defaultValue: false,
     description: "Serve SSH keys from your vault to ssh, Git and signing, while the vault is unlocked. Private keys stay in a separate helper process and are never written to disk." },

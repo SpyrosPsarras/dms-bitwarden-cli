@@ -5950,7 +5950,7 @@ Item {
   //
   // Set only by a probe that ran to its end and found the prompt unable to
   // run here (no frontend, or its `--check` failed: no quickshell, node,
-  // Wayland display or shell kit) (Model.pinentryProbeMissing()): a probe
+  // Wayland display or DmsUi) (Model.pinentryProbeMissing()): a probe
   // killed or still running leaves
   // pinentry offered, for the same reason as below.
   property bool pinentryMissing: false
@@ -6041,7 +6041,7 @@ Item {
     }
     pinentryProc.command = Model.pinentryCommand(omarchyPinentryPath, ask)
     // The description names the account: environment, not argv.
-    pinentryProc.environment = Model.pinentryEnvironment(ask)
+    pinentryProc.environment = Model.pinentryEnvironment(ask, DmsCommon.Theme)
     pinentryProc.capture = "pinentry:" + name
     pinentryProc.running = true
   }

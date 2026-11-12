@@ -1,15 +1,12 @@
 import QtQuick
-import qs.Commons
-import qs.Commons as Commons
-import qs.Ui
+import "../DmsUi"
 import ".."
 
-// The plugin's pinentry prompt (omarchy-pinentry, PinentryPrompt.qml):
-// the shell's polkit prompt, drawn the same way from the same theme values
-// (`[polkit]` in the theme's shell.toml, the system font, the border spec and
-// Hyprland's rounding). A translucent scrim over the whole surface, a card
-// with a padlock and a masked field, the description above it, and the
-// error of a retry above the field in the error colour.
+// The plugin's pinentry prompt (omarchy-pinentry, PinentryPrompt.qml), drawn
+// with the panel's DmsUi controls in the DMS theme: a translucent scrim over
+// the whole surface, a card with a padlock and a masked field, the
+// description above it, and the error of a retry above the field in the
+// error colour.
 //
 // The padlock shows what is typed and hides it again, and gives the field
 // its focus back. Enter submits (accepted()), Escape cancels (rejected());
@@ -27,16 +24,16 @@ Item {
   property string prompt: ""
   property string error: ""
 
-  property string fontFamily: Style.font.menuFamily
-  property color accent: Commons.Color.polkit.accent
-  property color background: Commons.Color.polkit.background
-  property color foreground: Commons.Color.polkit.text
-  property color textError: Commons.Color.polkit.textError
-  property color border: Commons.Color.polkit.border
-  property color borderError: Commons.Color.polkit.borderError
-  property color scrim: Commons.Color.polkit.scrim
-  property var borderSpec: Border.surfaceSpec("polkit", errorFlash ? "border-error" : "border",
-    errorFlash ? borderError : border, Math.max(1, Style.space(2)), "border-alpha")
+  property string fontFamily: Style.font.family
+  property color accent: DmsColor.accent
+  property color background: DmsColor.popups.background
+  property color foreground: DmsColor.foreground
+  property color textError: DmsColor.urgent
+  property color border: DmsColor.popups.border
+  property color borderError: DmsColor.urgent
+  property color scrim: DmsColor.menu.scrim
+  property var borderSpec: Border.surfaceSpec("popups", errorFlash ? "border-error" : "border",
+    errorFlash ? borderError : border, Math.max(1, Style.space(2)))
   readonly property int cornerRadius: Style.cornerRadius
   property int contentMargin: Style.spacing.panelPadding
   property int fieldHeight: Math.max(Style.space(42), Style.spacing.controlHeight)
@@ -156,7 +153,7 @@ Item {
         text: root.revealed ? "" : ""
         color: root.errorFlash ? root.textError : root.accent
         font.family: root.fontFamily
-        font.pixelSize: Style.font.iconLarge
+        font.pixelSize: Style.font.subtitle
         width: Style.space(26)
         height: root.fieldHeight
         horizontalAlignment: Text.AlignHCenter
@@ -183,7 +180,7 @@ Item {
           anchors.fill: parent
           framed: false
           fontFamily: root.fontFamily
-          fontPixelSize: Style.font.iconLarge
+          fontPixelSize: Style.font.subtitle
           horizontalPadding: 0
           verticalPadding: 0
           password: !root.revealed
@@ -210,7 +207,7 @@ Item {
           color: root.foreground
           opacity: 0.36
           font.family: root.fontFamily
-          font.pixelSize: Style.font.iconLarge
+          font.pixelSize: Style.font.subtitle
           elide: Text.ElideRight
           visible: passwordInput.text.length === 0
         }

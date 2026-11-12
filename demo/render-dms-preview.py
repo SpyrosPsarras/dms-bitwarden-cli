@@ -31,6 +31,7 @@ for p in repo.glob('*.qml'):
  if p.name not in ('BarWidget.qml','Settings.qml'):shutil.copy(p,tmp/p.name)
 for p in repo.glob('*.js'): shutil.copy(p,tmp/p.name)
 shutil.copytree(repo/'DmsUi',tmp/'DmsUi',dirs_exist_ok=True)
+shutil.copytree(repo/'pinentry',tmp/'pinentry',dirs_exist_ok=True)
 # Load the actual installed native controls; never start host services.
 dms=args.dms_dir
 if dms is None:

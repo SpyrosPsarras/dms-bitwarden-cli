@@ -4,7 +4,7 @@
 // directory, with no other program to fall back to. It speaks the Assuan
 // protocol on stdin/stdout and draws its prompt as a card over the focused
 // monitor in a short-lived Quickshell of its own (PinentryPrompt.qml), in the
-// style of the shell's polkit prompt. Where `--check` fails, the panel offers
+// DMS theme the panel passes in QSBW_PE_THEME. Where `--check` fails, the panel offers
 // its own field instead, and says what that costs.
 //
 // It runs under the vault helper, so it and the Quickshell it starts inherit
@@ -30,8 +30,7 @@
 //
 // Test only: QSBW_PINENTRY_TEST_UI names a program run in place of
 // `quickshell -p <dir>`, with the same environment, so the tests can answer
-// without a display. OMARCHY_SHELL_DIR names the shell kit (Commons, Ui),
-// otherwise $OMARCHY_PATH/shell or /usr/share/omarchy/shell.
+// without a display.
 
 "use strict"
 
@@ -61,20 +60,6 @@ const EXIT_GRACE_MS = 300
 const here = __dirname
 const testUi = process.env.QSBW_PINENTRY_TEST_UI || ""
 
-function kitDir() {
-  const candidates = []
-  if (process.env.OMARCHY_SHELL_DIR) candidates.push(process.env.OMARCHY_SHELL_DIR)
-  else {
-    if (process.env.OMARCHY_PATH) candidates.push(path.join(process.env.OMARCHY_PATH, "shell"))
-    candidates.push("/usr/share/omarchy/shell")
-  }
-  for (const dir of candidates) {
-    if (path.isAbsolute(dir) && fs.existsSync(path.join(dir, "Commons", "qmldir"))
-        && fs.existsSync(path.join(dir, "Ui", "qmldir"))) return dir
-  }
-  return ""
-}
-
 function onPath(name) {
   return (process.env.PATH || "").split(":").some(dir => {
     if (!dir) return false
@@ -103,9 +88,10 @@ function unusableReason() {
   if (testUi) return ""
   if (!process.env.WAYLAND_DISPLAY) return "no Wayland display"
   if (!onPath("quickshell")) return "quickshell is not installed"
-  if (!kitDir()) return "the Omarchy shell kit is not installed"
   if (!fs.existsSync(path.join(here, "PinentryPrompt.qml"))) return "PinentryPrompt.qml is missing"
+  if (!fs.existsSync(path.join(here, "Common", "Theme.qml"))) return "Common/Theme.qml is missing"
   if (!fs.existsSync(path.join(path.dirname(here), "LineField.qml"))) return "LineField.qml is missing"
+  if (!fs.existsSync(path.join(path.dirname(here), "DmsUi", "qmldir"))) return "DmsUi is missing"
   return ""
 }
 
@@ -233,25 +219,31 @@ function resetSettings() {
 // The run in progress: { dir, server, child, socket, chunks, timer, settled }.
 let run = null
 
-// The monitor Hyprland has focused now, by name, or "".
+// The output niri, or else Hyprland, has focused now, by name, or "" for the
+// compositor to choose.
 function focusedMonitor() {
   if (testUi) return process.env.QSBW_PINENTRY_TEST_MONITOR || ""
-  try {
-    const r = spawnSync("hyprctl", ["-j", "monitors"], { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] })
-    const monitors = JSON.parse(r.stdout || "[]")
-    const focused = Array.isArray(monitors) ? monitors.find(m => m && m.focused) : null
-    return focused && typeof focused.name === "string" ? focused.name : ""
-  } catch (e) {
-    return ""
+  const asks = [
+    ["niri", ["msg", "-j", "focused-output"], output => output],
+    ["hyprctl", ["-j", "monitors"], monitors => Array.isArray(monitors) ? monitors.find(m => m && m.focused) : null]
+  ]
+  for (const [program, args, focused] of asks) {
+    try {
+      const r = spawnSync(program, args, { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] })
+      const monitor = r.status === 0 ? focused(JSON.parse(r.stdout || "null")) : null
+      if (monitor && typeof monitor.name === "string") return monitor.name
+    } catch (e) { /* the next compositor */ }
   }
+  return ""
 }
 
 // The Quickshell config the prompt runs as: a fixed directory per plugin
 // checkout (so Quickshell keeps one shell id for it, not one per prompt) that
-// holds no secret, only shell.qml and links to the shell kit and this
-// directory. The shell's `qs.Commons` and `qs.Ui` resolve against it, so the
-// prompt draws with the shell's own theme, font, border and rounding.
-function promptConfig(runtime, kit) {
+// holds no secret, only shell.qml and links to this directory, the panel's
+// DmsUi and LineField, and Common/Theme.qml, which stands in for DMS's
+// `qs.Common` with the theme the panel passed (QSBW_PE_THEME). DMS's own
+// Common is not loaded: it would start a second copy of its settings.
+function promptConfig(runtime) {
   const id = crypto.createHash("sha256").update(here).digest("hex").slice(0, 12)
   const dir = path.join(runtime, "qsbw-pinentry-ui-" + id)
   try {
@@ -276,8 +268,8 @@ function promptConfig(runtime, kit) {
     } catch (e) { /* not a link yet */ }
     place(name, tmp => fs.symlinkSync(target, tmp))
   }
-  want("Commons", path.join(kit, "Commons"))
-  want("Ui", path.join(kit, "Ui"))
+  want("Common", path.join(here, "Common"))
+  want("DmsUi", path.join(path.dirname(here), "DmsUi"))
   want("prompt", here)
   // The card's field is the panel's own LineField (`import ".."`).
   want("LineField.qml", path.join(path.dirname(here), "LineField.qml"))
@@ -343,8 +335,7 @@ function getpin() {
     return
   }
   const runtime = runtimeDir()
-  const kit = testUi ? "" : kitDir()
-  if (!runtime || (!testUi && !kit)) {
+  if (!runtime) {
     reply(ERR_GENERAL)
     return
   }
@@ -394,7 +385,7 @@ function getpin() {
     if (r.settled) return
     let child
     try {
-      const argv = testUi ? [testUi, []] : ["quickshell", ["-p", promptConfig(runtime, kit)]]
+      const argv = testUi ? [testUi, []] : ["quickshell", ["-p", promptConfig(runtime)]]
       child = spawn(argv[0], argv[1], { env: uiEnvironment(r.dir), stdio: ["ignore", "ignore", "inherit"] })
     } catch (e) {
       settle(ERR_GENERAL)

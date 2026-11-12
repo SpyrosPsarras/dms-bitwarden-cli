@@ -20,7 +20,7 @@ const names = ["requestPinentry", "onPinentryExited", "beginPinentry", "hideForP
 
 function makeVault(extra) {
   const v = {
-    Model, Qt: { callLater: f => f() },
+    Model, Qt: { callLater: f => f() }, DmsCommon: { Theme: { primary: "#112233" } },
     usePinentry: true, pinentryMissing: false, pinentryDeclined: false, vaultHelperActive: true,
     // As Service.qml binds them.
     get vaultHelperState() { return this.vaultHelperActive ? "active" : "stopped" },
@@ -488,7 +488,7 @@ check("no pinentry flow writes what was typed into the shell's fields",
 check("the run asks the helper to hold the answer",
   /pinentryProc\.capture = "pinentry:" \+ name/.test(body("requestPinentry"))
     && /Model\.pinentryCommand\(omarchyPinentryPath, ask\)/.test(body("requestPinentry"))
-    && /pinentryProc\.environment = Model\.pinentryEnvironment\(/.test(body("requestPinentry")), body("requestPinentry"))
+    && /pinentryProc\.environment = Model\.pinentryEnvironment\(ask, DmsCommon\.Theme\)/.test(body("requestPinentry")), body("requestPinentry"))
 check("the process is a VaultProcess with no session and no output collector",
   /VaultProcess \{\s*id: pinentryProc\s*vault: root\s*session: false\s*stderr: VaultCollector[^\n]*\n\s*onExited/.test(service)
     && !/id: pinentryProc[\s\S]{0,200}stdout:/.test(service), "")
