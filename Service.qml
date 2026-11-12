@@ -3103,8 +3103,10 @@ Item {
       root.sshAgentKeyCount = 0
       return
     }
-    // A new helper is empty even if the vault epoch did not move; allow a load.
+    // A new helper is empty even if the vault epoch did not move; allow a load,
+    // also after a running retry, which has no agent branch to retry again.
     root.sshAgentLoadedForVaultEpoch = -1
+    listRetriedWithoutAgent = false
     root.sshAgentLoadFailStreak = 0
     primeSshAgentLoadId()
     // A remembered session may already be unlocked. Deferred a beat so the
@@ -6879,6 +6881,7 @@ Item {
 
     if (exitCode === 0) {
       onListFinished(rawJson)
+      // After the call: its maybeStartupLoad() must still see the retry.
       listRetriedWithoutAgent = false
       return
     }

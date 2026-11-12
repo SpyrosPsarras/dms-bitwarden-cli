@@ -13,6 +13,8 @@ const functions = ["ensureItemsFresh", "beginInitialVaultLoad", "loadPendingMeta
   "epochOperationIsStale", "autoSyncIdle", "maybeAutoSync", "syncVault", "onSyncFinished",
   "onSaveItemFinished"]
 const loadId = "0123456789abcdef0123456789abcdef"
+const gateOpenHandler = functionBody(
+  source.replace("onSshAgentGateOpenChanged: {", "function onSshAgentGateOpenChanged() {"), "onSshAgentGateOpenChanged")
 
 function fixture() {
   const c = {
@@ -35,7 +37,9 @@ function fixture() {
     bwEnv: () => ({}), primeSshAgentLoadId() {}, applySshAgentLifecycle() {},
     loadOrganizations() {}, loadFolders() {}, loadCollections() {}, rebuildFilter() {},
     handleActiveWindowDetected() {}, refreshDerivedFromItems() {}, flashNotification() {},
-    closeFilterGroup() {}, finishScrubRun: () => false, deferredMetadataTimer: { restart() {} }
+    closeFilterGroup() {}, finishScrubRun: () => false, deferredMetadataTimer: { restart() {} },
+    sendSshAgentOptions() {}, sshAgentLoadFailStreak: 0, sshAgentKeyCount: 0,
+    sshAgentStartupLoadTimer: { restart() { c.maybeStartupLoad() } }
   }
   c.root = c
   for (const proc of ["listProc", "listOrgsProc", "listFoldersProc", "createItemProc",
@@ -43,7 +47,7 @@ function fixture() {
     c[proc] = { running: false, command: [], environment: {} }
   c.Date = { now: () => c.now }
   vm.createContext(c)
-  vm.runInContext(functions.map(n => functionBody(source, n)).join("\n"), c)
+  vm.runInContext(functions.map(n => functionBody(source, n)).join("\n") + "\n" + gateOpenHandler, c)
   c.listExits = code => { c.listProc.running = false; c.onListProcessExited(code, "[]", "") }
   return c
 }
@@ -108,6 +112,15 @@ const leftAgentAlone = c => c.sshAgentEpoch === 14 && c.written.length === 0
   c.now += 120000; c.ensureItemsFresh()
   eq("the next panel read reloads the keys the failed load dropped",
     c.sshAgentEpoch === 16 && c.listProc.environment[Model.loadIdEnvVar()] === loadId, true)
+}
+{
+  const c = fixture(); c.lifecycle = []; c.applySshAgentLifecycle = event => c.lifecycle.push(event)
+  c.beginInitialVaultLoad(true, false); c.listExits(1)
+  c.sshAgentGateOpen = false; c.onSshAgentGateOpenChanged()
+  c.sshAgentNextLoadId = loadId; c.sshAgentGateOpen = true; c.onSshAgentGateOpenChanged()
+  eq("an agent restart during the retry waits for the retry", c.lifecycle.length, 0)
+  c.listExits(0)
+  eq("and loads the new agent's keys once the retry lands", c.lifecycle.join(","), "startup")
 }
 {
   const c = fixture(); c.status = "locked"; c.vaultEpoch = 4; c.ensureItemsFresh()

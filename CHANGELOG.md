@@ -9,6 +9,8 @@
   load ends all grants and fails requests waiting for approval. That refresh
   now leaves keys the agent already holds for the unlocked vault alone. An
   unlock, account switch or sync still hands them over again.
+- After a failed SSH key load, the next panel refresh hands the agent its keys
+  again.
 
 ## [1.12.0-dms.1] - 2026-11-12
 
