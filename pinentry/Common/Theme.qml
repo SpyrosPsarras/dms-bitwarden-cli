@@ -28,9 +28,9 @@ QtObject {
   readonly property color surfaceContainerHigh: pick("surfaceContainerHigh", "#302939")
   readonly property color primary: pick("primary", "#cbb7ff")
   readonly property color outline: pick("outline", "#53495f")
-  readonly property color error: pick("error", "#f2b8b5")
-  readonly property string fontFamily: pick("fontFamily", "sans-serif")
-  readonly property real cornerRadius: pick("cornerRadius", 12)
+  readonly property color error: pick("error", "#ffb4ab")
+  readonly property string fontFamily: pick("fontFamily", "JetBrainsMono Nerd Font")
+  readonly property real cornerRadius: pick("cornerRadius", 16)
   readonly property real spacingS: pick("spacingS", 8)
   readonly property real spacingM: pick("spacingM", 12)
   readonly property real spacingL: pick("spacingL", 16)
@@ -38,7 +38,7 @@ QtObject {
   readonly property real fontSizeMedium: pick("fontSizeMedium", 14)
   readonly property real fontSizeLarge: pick("fontSizeLarge", 16)
   readonly property real fontSizeXLarge: pick("fontSizeXLarge", 20)
-  readonly property real iconSize: pick("iconSize", 24)
+  readonly property real iconSize: pick("iconSize", 20)
 
   function withAlpha(c, a) {
     return Qt.rgba(c.r, c.g, c.b, a)

@@ -308,6 +308,14 @@ function checks() {
       && /want\("LineField\.qml", path\.join\(path\.dirname\(here\), "LineField\.qml"\)\)/.test(src)
       && /"LineField\.qml is missing"/.test(src),
     "the prompt would type into a field that reads every clipboard offer")
+  const commonTheme = fs.readFileSync(path.join(repoRoot, "pinentry", "Common", "Theme.qml"), "utf8")
+  const themed = ["LineField.qml", ...["DmsUi", "pinentry"].flatMap(dir => fs.readdirSync(path.join(repoRoot, dir))
+    .filter(f => f.endsWith(".qml")).map(f => path.join(dir, f)))]
+  const reads = new Set(themed.flatMap(f => [...fs.readFileSync(path.join(repoRoot, f), "utf8")
+    .matchAll(/\bTheme\.(\w+)\b(?!\s*\()/g)].map(m => m[1])))
+  const missing = [...reads].filter(key => !Model.PINENTRY_THEME_KEYS.includes(key)
+    || !new RegExp(`property \\w+ ${key}: pick\\("${key}"`).test(commonTheme))
+  check("every theme value the prompt reads is passed to it and has a default", missing.length === 0, missing.join(", "))
   const st = fs.statSync(frontend)
   check("the frontend is executable in the checkout", (st.mode & 0o111) !== 0, (st.mode & 0o777).toString(8))
 }
