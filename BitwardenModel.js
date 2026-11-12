@@ -724,12 +724,10 @@ function twoFactorMethodLabel(method) {
   return ""
 }
 
-// Remembered two-step methods, keyed by a hash of the account email. The map
-// is written with `omarchy bar set <id> <key> <value>`, which has no stdin or
-// file form for the value, so it would sit in argv (world-readable) with every
-// email in it. Hashed, argv shows no address in plain text. The hash is
-// unkeyed, so whoever can read argv or shell.json and guesses an address can
-// confirm it and see its method. Maps written before 1.11.8 are keyed by the
+// Remembered two-step methods, keyed by a hash of the account email, so DMS's
+// plugin_settings.json holds no address in plain text. The hash is unkeyed,
+// so whoever can read that file and guesses an address can confirm it and see
+// its method. Maps written before 1.11.8 are keyed by the
 // plain email: read by either key, rewritten hashed on the next write.
 var MAX_REMEMBERED_ACCOUNTS = 10
 
