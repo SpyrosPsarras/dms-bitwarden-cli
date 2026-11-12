@@ -3757,7 +3757,7 @@ Item {
                     PanelActionButton {
                       visible: root.vault.autoTypeEnabled && Model.isLoginItem(itemRow.itemData) && itemRow.itemData.hasPassword
                       iconText: ""
-                      tooltipText: "Copy password and arm auto-type (Ctrl+C)"
+                      tooltipText: Tr.text("Copy password and arm auto-type (Ctrl+C)")
                       fontFamily: root.fontFamily
                       onClicked: root.vault.copyPasswordAndArm(itemRow.itemData)
                     }

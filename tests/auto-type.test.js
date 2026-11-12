@@ -97,7 +97,7 @@ check("and asked again when it is turned on or off",
 
 const flowNames = ["itemNeedsReprompt", "repromptSatisfied", "withReprompt", "autoTypeArmed", "disarmAutoType",
   "stopAutoType", "copyPasswordAndArm", "requestAutoType", "onAutoTypeRead", "typeHere", "onAutoTypeExited",
-  "finishAutoType", "screenLockReadingFresh", "armTotpFollowup", "copyTotpAfterAutoType", "notifyTotpCopied"]
+  "finishAutoType", "armTotpFollowup", "copyTotpAfterAutoType", "notifyTotpCopied"]
 function makeVault() {
   const calls = []
   const timer = name => ({ running: false, interval: 0, restart() { this.running = true; calls.push(name + ".restart") },
@@ -108,8 +108,7 @@ function makeVault() {
     autoTypeTypedItemId: "", autoTypeTypedEpoch: -1, autoCopyTotpSec: 3, fetches: [],
     totpFollowupItem: null, totpFollowupActive: false,
     opened: false, sshPrompt: null, pinentryActive: false, vaultHelperActive: true,
-    // A screen-lock reading from just now.
-    screenIsLocked: false, screenLockCheckedAt: Date.now(), screenLockStateProc: { running: false },
+    screenIsLocked: false,
     errorMessage: "", flashed: [], notices: [], queries: [], reads: [],
     repromptPending: false, repromptItemId: "", repromptItemName: "", repromptError: "", repromptBusy: false,
     repromptCallback: null, repromptEpoch: -1, repromptVerifiedId: "", repromptActionId: "", detailItem: null,
@@ -185,7 +184,7 @@ const item = (v, id) => v.items.find(i => i.id === id)
 
 // --- the TOTP code, around a type --------------------------------------------------------
 
-const totpNotices = v => v.notices.filter(c => c[0] === "omarchy-notification-send" && c.indexOf("TOTP Code Copied") >= 0)
+const totpNotices = v => v.notices.filter(c => c[0] === "notify-send" && c.indexOf("TOTP Code Copied") >= 0)
 const totpCopies = v => v.fetches.filter(f => f[1])
 {
   const v = makeVault()
@@ -373,33 +372,10 @@ check("the IPC answers with requestAutoType()'s result",
 
 // --- the screen-lock reading ----------------------------------------------------------
 
-{
-  // Only the poll refreshes screenIsLocked, and with lockOnScreenLock off it
-  // used to run only for the SSH agent: a stale false let a type land on the
-  // lock screen. A reading older than a few polls, or none, counts as locked.
-  const stale = Date.now() - Model.screenLockPollMs() * 4 - 1
-  for (const [what, at] of [["stale", stale], ["absent", 0]]) {
-    const v = makeVault()
-    v.copyPasswordAndArm(item(v, "a"))
-    v.screenLockCheckedAt = at
-    check(`a ${what} reading is refused as the screen locked, and the arm kept for the next press`,
-      v.requestAutoType() === "screen-locked" && v.autoTypeArmed() && !v.autoTypeBusy && v.queries.length === 0,
-      JSON.stringify({ armed: v.autoTypeArmed(), busy: v.autoTypeBusy }))
-  }
-  const v = makeVault()
-  v.copyPasswordAndArm(item(v, "a"))
-  v.screenLockCheckedAt = Date.now() - Model.screenLockPollMs() * 4 + 500
-  eq("a fresh reading of an unlocked screen types", v.requestAutoType(), "started")
-  const w = makeVault()
-  w.copyPasswordAndArm(item(w, "a"))
-  check("arming takes a reading at once, so the first press is not refused as stale",
-    w.screenLockStateProc.running === true, "")
-  check("the poll runs while an arm is live, whatever the lock-on-screen-lock setting",
-    /id: screenLockPoll[\s\S]{0,600}running: \(root\.lockOnScreenLock && root\.status === "unlocked"\) \|\| root\.sshAgentGateOpen\s*\|\| \(root\.autoTypeEnabled && root\.autoTypeItemId !== ""\)/.test(service), "")
-  check("the SSH agent's prompts and auto-type share the one freshness rule",
-    /screenLockReadingFresh\(\)/.test(body("sshAgentMayPrompt")) && /screenLockReadingFresh\(\)/.test(body("requestAutoType"))
-      && !/screenLockCheckedAt/.test(body("sshAgentMayPrompt")), body("sshAgentMayPrompt"))
-}
+check("the lock state is DMS's live IdleService reading, with no poll to go stale",
+  /if \(screenIsLocked\) return "screen-locked"/.test(body("requestAutoType"))
+    && /readonly property bool screenIsLocked: IdleService\.isShellLocked/.test(service)
+    && !/screenLockPoll|screenLockStateProc|screenLockCheckedAt|screenLockReadingFresh/.test(service), "")
 
 // --- a lock during a type ---------------------------------------------------------------
 
@@ -614,7 +590,7 @@ check("LineField hands its keys to the field's own handler before the editor's c
     && /property alias selectedText: editor\.selectedText/.test(read("LineField.qml")), "")
 check("Enter in the search box acts on the same row",
   /Keys\.onReturnPressed: root\.smartEnter\(root\.getSelectedItem\(\)\)/.test(searchBox), "")
-const row = view.slice(view.indexOf("id: actionButtonsRow"), view.indexOf("id: rowMouseArea"))
+const row = view.slice(view.indexOf("id: actionButtonsRow"), view.indexOf('tooltipText: "Open URL (w)"'))
 const armButton = row.slice(row.indexOf("arm auto-type") - 300, row.indexOf("arm auto-type") + 200)
 check("the row's button is shown only with auto-type on, says what it does, and arms after any prompt",
   /visible: root\.vault\.autoTypeEnabled && Model\.isLoginItem\(itemRow\.itemData\) && itemRow\.itemData\.hasPassword/.test(armButton)

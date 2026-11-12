@@ -8537,9 +8537,6 @@ Item {
       root.autoTypeItemId = String(item.id)
       root.autoTypeArmEpoch = root.vaultEpoch
       autoTypeArmTimer.restart()
-      // The poll runs while armed; a reading now is normally in before the
-      // key can be pressed, so the first type is not refused as stale.
-      if (!screenLockStateProc.running) screenLockStateProc.running = true
       root.copyPasswordNow(item, "Password copied; auto-type armed for "
         + Math.round(Model.autoTypeArmMs() / 1000) + " s")
       root.armTotpFollowup(item)
@@ -8561,9 +8558,8 @@ Item {
       if (opened) errorMessage = "Close the panel first: auto-type types into the window it returns to"
       return "panel-open"
     }
-    // A stale or missing reading counts as locked; the arm is kept for the
-    // next press, by which time the poll has one.
-    if (!screenLockReadingFresh() || screenIsLocked) return "screen-locked"
+    // DMS's IdleService reports the lock live; the arm is kept for the next press.
+    if (screenIsLocked) return "screen-locked"
     var item = Model.findItemById(items, autoTypeItemId)
     // One type per arm, whatever comes of it.
     disarmAutoType()
