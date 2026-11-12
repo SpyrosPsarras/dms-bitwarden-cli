@@ -299,8 +299,7 @@ check("install refuses a package name that is not one",
   JSON.stringify(Model.installPackagesCommand(["bitwarden-cli; rm -rf /"])))
 
 // --- a Node.js provider bitwarden-cli would replace (#101) ------------------
-// omarchy-pkg-add runs pacman with --noconfirm, which answers "Remove nodejs?"
-// with N, so that install can never succeed while the swap is pending.
+// pacman asks "Remove nodejs?"; the installer's terminal must let it.
 const swapRaw = "bw=0\njq=1\nfprintd=0\nfingerprint_ready=0\nomarchy=1\n"
 const nodeSwap = Model.parseDependencies(swapRaw + "bw_provider_have=nodejs\nbw_provider_need=nodejs-lts-jod")
 check("a conflicting Node provider is reported on the bw row, with the way to keep it",
@@ -310,40 +309,18 @@ check("a conflicting Node provider is reported on the bw row, with the way to ke
     && /npm or mise/.test(byKey(nodeSwap, "bw").note),
   JSON.stringify(byKey(nodeSwap, "bw")))
 const swapCmd = Model.dependencyInstallCommand(nodeSwap, ["bitwarden-cli", "jq"], "Bitwarden plugin dependencies")
-check("a pending swap installs with pacman itself, which can ask",
-  swapCmd.slice(0, 6).join(" ") === "omarchy launch floating terminal with presentation"
-    && swapCmd.length === 7
-    && /; sudo pacman -S --needed bitwarden-cli jq \|\| printf /.test(swapCmd[6])
-    && !/--noconfirm|--ask/.test(swapCmd[6]),
+check("a pending swap installs with pacman in a terminal, which can ask",
+  JSON.stringify(swapCmd) === JSON.stringify(Model.installPackagesCommand(["bitwarden-cli", "jq"], "Bitwarden plugin dependencies"))
+    && /sudo pacman -S --needed [^;]*bitwarden-cli[^;]*jq/.test(swapCmd[2]) && !/--noconfirm|--ask/.test(swapCmd[2])
+    && Model.installNeedsConfirmation(nodeSwap, ["bitwarden-cli"]) && !Model.installNeedsConfirmation(nodeSwap, ["jq"]),
   JSON.stringify(swapCmd))
-{
-  // Declining the swap leaves pacman non-zero; the terminal still says
-  // "Done!", so the script has to say nothing went in. Run it with a sudo
-  // that fails the way a declined pacman does.
-  const fs = require("fs"), os = require("os"), cp = require("child_process")
-  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "qsbw-sudo-"))
-  fs.writeFileSync(path.join(bin, "sudo"), "#!/bin/bash\nexit 1\n", { mode: 0o755 })
-  const r = cp.spawnSync("bash", ["-c", swapCmd[6]],
-    { env: Object.assign({}, process.env, { PATH: bin + ":" + process.env.PATH }) })
-  fs.writeFileSync(path.join(bin, "sudo"), "#!/bin/bash\nexit 0\n", { mode: 0o755 })
-  const ok = cp.spawnSync("bash", ["-c", swapCmd[6]],
-    { env: Object.assign({}, process.env, { PATH: bin + ":" + process.env.PATH }) })
-  fs.rmSync(bin, { recursive: true, force: true })
-  check("a declined swap says nothing was installed; a completed one does not",
-    /Error: Bitwarden plugin dependencies did not install/.test(r.stderr.toString())
-      && ok.stderr.toString() === "",
-    JSON.stringify({ declined: r.stderr.toString(), completed: ok.stderr.toString() }))
-}
-check("the tooltip names the command the swap actually runs",
+check("the tooltip names the command the install runs",
   Model.dependencyInstallHint(nodeSwap, ["bitwarden-cli"]) === "sudo pacman -S --needed bitwarden-cli",
   Model.dependencyInstallHint(nodeSwap, ["bitwarden-cli"]))
-check("a swap on bw does not reroute an install that leaves bw out",
-  Model.dependencyInstallCommand(nodeSwap, ["jq"], "jq").slice(0, 3).join(" ") === "omarchy install app",
-  JSON.stringify(Model.dependencyInstallCommand(nodeSwap, ["jq"], "jq")))
-check("the pacman install refuses a package name that is not one",
-  Model.confirmedInstallCommand(["bitwarden-cli; rm -rf /"]) === null
-    && Model.confirmedInstallCommand([]) === null,
-  JSON.stringify(Model.confirmedInstallCommand(["bitwarden-cli; rm -rf /"])))
+check("the install refuses a package name that is not one",
+  Model.dependencyInstallCommand(nodeSwap, ["bitwarden-cli; rm -rf /"]) === null
+    && Model.dependencyInstallCommand(nodeSwap, []) === null,
+  JSON.stringify(Model.dependencyInstallCommand(nodeSwap, ["bitwarden-cli; rm -rf /"])))
 for (const [label, fields] of [
   ["the needed provider already installed", "bw_provider_have=nodejs-lts-jod\nbw_provider_need=nodejs-lts-jod"],
   ["no Node installed", "bw_provider_have=\nbw_provider_need=nodejs-lts-jod"],
@@ -353,10 +330,9 @@ for (const [label, fields] of [
   ["a probe from before this check", ""]
 ]) {
   const deps = Model.parseDependencies(swapRaw + fields)
-  check("no swap, so Omarchy's installer as before: " + label,
+  check("no swap: " + label,
     byKey(deps, "bw").swap === null && byKey(deps, "bw").note === ""
-      && Model.dependencyInstallCommand(deps, ["bitwarden-cli"], "Bitwarden CLI").slice(0, 3).join(" ")
-        === "omarchy install app",
+      && !Model.installNeedsConfirmation(deps, ["bitwarden-cli"]),
     JSON.stringify(byKey(deps, "bw")))
 }
 check("an installed bw never reports a swap",

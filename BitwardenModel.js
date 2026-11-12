@@ -5189,8 +5189,7 @@ var DEPENDENCIES = [
     required: true,
     // Arch builds bitwarden-cli against one Node LTS package (nodejs-lts-jod),
     // which conflicts with whatever else provides `nodejs` -- the plain nodejs
-    // package Zed pulls in, for one. `omarchy install app` answers pacman's
-    // "Remove nodejs?" with its default N, so that install cannot succeed.
+    // package Zed pulls in, for one. pacman then asks "Remove nodejs?".
     provider: "nodejs",
     purpose: "Reads and writes your vault. The panel installs it for you on first run."
   },
@@ -7276,22 +7275,6 @@ function buildHelpersCommand(pluginDir, translate) {
   return ["bash", "-c", terminalScript(inner)]
 }
 
-// pacman itself, without --noconfirm, so it can ask before replacing a
-// conflicting package -- the one question omarchy-pkg-add cannot put to the
-// user. Same floating terminal as `omarchy install app`, and the same red
-// line as omarchy-pkg-add when nothing went in, since the terminal's "Done!"
-// follows either way.
-function confirmedInstallCommand(pkgs, displayName) {
-  if (!pkgs || pkgs.length === 0) return null
-  for (var i = 0; i < pkgs.length; i++) {
-    if (!isPlainPackageName(pkgs[i])) return null
-  }
-  var name = displayName || (pkgs.length === 1 ? pkgs[0] : "Bitwarden plugin dependencies")
-  return ["omarchy", "launch", "floating", "terminal", "with", "presentation",
-    "echo " + shellQuote("Installing " + name + "...") + "; sudo pacman -S --needed " + pkgs.join(" ")
-      + " || printf '\\033[31mError: %s did not install\\033[0m\\n' " + shellQuote(name) + " >&2"]
-}
-
 // Whether installing `pkgs` replaces a package, so pacman has to ask.
 function installNeedsConfirmation(deps, pkgs) {
   if (!deps || !deps.items || !pkgs) return false
@@ -7302,19 +7285,16 @@ function installNeedsConfirmation(deps, pkgs) {
   return false
 }
 
-// Omarchy's installer, unless a package swap needs pacman to ask. One
-// transaction either way, so a single terminal opens.
+// installPackagesCommand() runs pacman without --noconfirm, so it can already
+// ask before a swap; installNeedsConfirmation() only changes the notice.
 function dependencyInstallCommand(deps, pkgs, displayName) {
-  return installNeedsConfirmation(deps, pkgs)
-    ? confirmedInstallCommand(pkgs, displayName)
-    : installPackagesCommand(pkgs, displayName)
+  return installPackagesCommand(pkgs, displayName)
 }
 
 // What the Install button runs, for its tooltip.
 function dependencyInstallHint(deps, pkgs) {
   if (!pkgs || pkgs.length === 0) return ""
-  return (installNeedsConfirmation(deps, pkgs) ? "sudo pacman -S --needed " : "omarchy install app ")
-    + pkgs.join(" ")
+  return "sudo pacman -S --needed " + pkgs.join(" ")
 }
 
 // Omarchy's interactive fingerprint setup (packages, enrolment, PAM stack),

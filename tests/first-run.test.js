@@ -161,7 +161,7 @@ check("install: refuses anything that is not a plain package name",
 // --- wtype is for auto-type, which is off by default ------------------------
 // A tool that types into other windows is not installed with the rest unless
 // auto-type has been turned on.
-const NO_WTYPE = "bw=1\nbw_version=2025.1.2\njq=1\nwtype=0\nfprintd=0\nfingerprint_ready=0\nfingerprint_hw=0\nomarchy=1"
+const NO_WTYPE = "bw=1\nbw_version=2025.1.2\njq=1\nwlcopy=1\ncargo=1\nwtype=0\nfprintd=0\nfingerprint_ready=0\nfingerprint_hw=0\nomarchy=1"
 const wtypeRow = deps => deps.items.find(d => d.key === "wtype")
 {
   const off = Model.parseDependencies(NO_WTYPE, null)
