@@ -1,5 +1,45 @@
 # Changelog
 
+## [1.12.0-dms.1] - 2026-11-12
+
+- Merge upstream 1.11.7, 1.11.8 and 1.12.0 into the DMS port. The fork's 51
+  commits stay in history; upstream 1.11.6 is recorded as already ported.
+
+### Added
+
+- **Automatic sync** every 15 minutes by default (`autoSyncMinutes`, `0` off),
+  in Settings → General. It holds while an SSH request waits for approval and
+  while any until-screen-lock SSH grant is live, since a sync's reload ends
+  every grant, and resumes once the grant ends. Manual sync is unchanged.
+- **Auto-type** (opt-in, `autoTypeEnabled`): Ctrl+C arms the highlighted login
+  for 30 seconds and `dms ipc call bitwarden autoType` types it with `wtype`.
+  The key screen that writes Hyprland bindings is kept; on niri, bind the IPC
+  command in niri's config. The lock check uses DMS `IdleService`.
+- **The plugin's own unlock prompt** (`pinentry/omarchy-pinentry`) replaces
+  `pinentry-qt`. Its card uses DmsUi controls and the DMS theme the panel
+  passes in, finds the focused output through niri (or Hyprland), and loads
+  no Omarchy, `qs.Commons` or `Quickshell.Hyprland` module. The SSH popup
+  still hides while it asks to unlock.
+
+### Security
+
+- Account email, user id and server stay out of process arguments; remembered
+  two-step methods are keyed by a hash of the address.
+- A forwarded SSH agent connection lists keys without item names.
+- Turning fingerprint unlock off deletes the stored quick-unlock password.
+- The pinentry prompt's private directory is removed before it answers, and
+  one left by a killed prompt is swept by the next.
+- Upstream's unlock-race, tokio FIFO, helper-loss notice and wiped helper
+  reply fixes.
+
+### Fixed
+
+- Enter saves a new or edited item from a text field again.
+- Generator options are remembered, in the DMS plugin settings.
+- Ctrl+C in the search box arms the highlighted login with auto-type on.
+- Installing `bitwarden-cli` over a conflicting Node.js provider says to
+  answer pacman's question in the install terminal.
+
 ## [1.11.6-dms.7] - 2026-11-11
 
 ### Added
