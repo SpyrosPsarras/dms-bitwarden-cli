@@ -319,6 +319,7 @@ impl Helper {
                 self.copy(q, value, clear_sec);
             }
             Request::AutoType { q, id, .. } => self.auto_type(q, &id),
+            Request::CancelAutoType { .. } => self.stop_typing(),
             Request::Totp { q, id, .. } => {
                 let key = self.field(&id, &["login", "totp"]);
                 let now = SystemTime::now()

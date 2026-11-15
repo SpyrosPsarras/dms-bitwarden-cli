@@ -1,8 +1,16 @@
 # Changelog
 
-## [1.12.0-dms.2] - 2026-11-12
+## [1.12.0-dms.2] - 2026-11-15
 
 ### Fixed
+
+- Replace the obsolete system pinentry dependency with Node.js for the new
+  unlock prompt, including installations using a standalone Bitwarden CLI.
+- Cancel auto-type in the vault helper as well as the shell on timeout,
+  disabling auto-type, and screen lock, even when vault locking on screen lock
+  is disabled. Cancellation preserves the unlocked vault in that mode.
+- Refuse copy-and-arm when clipboard tools are missing, without closing the
+  panel or scheduling a TOTP copy over the previous clipboard value.
 
 - Opening the panel no longer ends SSH approval grants. Its refresh of a list
   older than a minute read the vault again with the SSH keys, and every key

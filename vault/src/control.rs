@@ -102,6 +102,10 @@ pub enum Request {
         q: u64,
         id: String,
     },
+    /// Stop typing without discarding the unlocked vault.
+    CancelAutoType {
+        v: u8,
+    },
     Totp {
         v: u8,
         q: u64,
@@ -132,6 +136,7 @@ impl Request {
             | Self::Field { v, .. }
             | Self::CopyField { v, .. }
             | Self::AutoType { v, .. }
+            | Self::CancelAutoType { v }
             | Self::Totp { v, .. }
             | Self::Search { v, .. }
             | Self::Shutdown { v } => *v,

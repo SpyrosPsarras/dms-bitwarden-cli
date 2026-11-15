@@ -52,8 +52,9 @@ Translations are shipped in `translations/de.json` and loaded through DMS's plug
   missing; setup offers wl-clipboard on DMS installations that lack either tool.
 - Rust/Cargo (`rust` on Arch) to build the vault, unlock-key and SSH helpers with
   `./scripts/build-helpers.sh`.
-- `argon2` for quick unlock. The unlock prompt needs `node` and `quickshell`,
-  which `bw` and DMS already need; `pinentry-qt` is no longer used.
+- `argon2` for quick unlock. The unlock prompt needs `node` and `quickshell`.
+  Install Node.js separately when using a standalone `bw` binary; `pinentry-qt`
+  is no longer used.
 - `wtype`, only for the optional auto-type.
 - A running Secret Service provider (for example `gnome-keyring`) and `secret-tool` for remembering sessions, PIN and fingerprint unlock. Installing `libsecret` alone provides only the client, not a keyring service.
 - `gdbus` and `systemd-inhibit` for the suspend monitor.

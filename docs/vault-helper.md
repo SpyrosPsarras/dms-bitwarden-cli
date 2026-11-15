@@ -272,3 +272,10 @@ vault/target/debug/qs-bitwarden-vault --self-test
 
 These checks validate the local source build. They do not claim provenance or
 byte-for-byte identity with upstream release binaries.
+
+### Cancelling auto-type
+
+The `cancelAutoType` control message (`v: 1`) stops the active typing process
+without forgetting the vault. DMS sends it on timeout, when auto-type is
+disabled, and on screen lock even if automatic vault locking is disabled.
+Rebuild the helper after updating to 1.12.0-dms.2.

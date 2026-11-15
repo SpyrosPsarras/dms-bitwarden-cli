@@ -505,6 +505,23 @@ fn a_forget_stops_an_auto_type_in_progress() {
 }
 
 #[test]
+fn cancelling_auto_type_preserves_the_unlocked_vault() {
+    let mut helper = typing_slowly(30);
+    helper.send(json!({ "type": "cancelAutoType", "v": 1 }));
+    assert_eq!(
+        helper.reply("q", 30),
+        json!({ "type": "result", "q": 30, "ok": false, "value": "stopped" })
+    );
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(!helper.dir.join("typed-done").exists(), "wtype kept typing");
+    std::fs::remove_file(helper.dir.join("wtype-slow")).unwrap();
+    assert_eq!(
+        helper.query(31, json!({ "type": "autoType", "id": "a" }))["ok"],
+        true
+    );
+}
+
+#[test]
 fn a_shutdown_stops_an_auto_type_in_progress() {
     let mut helper = typing_slowly(40);
     let asked = Instant::now();

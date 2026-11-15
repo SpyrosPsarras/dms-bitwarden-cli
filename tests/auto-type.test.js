@@ -125,6 +125,8 @@ function makeVault() {
     autoTypeProc: { running: false, stdinEnabled: false, command: [] },
     autoTypeReadProc: { running: false, command: [], itemId: "" },
     Quickshell: { execDetached(cmd) { v.notices.push(cmd) } },
+    clipboardMissing() { return v.missingClipboard === true },
+    helperWrites: [], vaultHelperProc: { write(line) { v.helperWrites.push(JSON.parse(line)) } },
     closeFilterGroup() {},
     close() { calls.push("close") },
     copyPasswordNow(item, notice) { calls.push("copy:" + item.id + ":" + notice) },
@@ -179,7 +181,7 @@ const item = (v, id) => v.items.find(i => i.id === id)
       && /autoTypePendingText = ""/.test(body("stopAutoType")), body("dropVaultSecrets"))
   check("it lasts autoTypeArmMs, then is dropped",
     /id: autoTypeArmTimer\s*interval: Model\.autoTypeArmMs\(\)\s*repeat: false\s*onTriggered: root\.disarmAutoType\(\)/.test(service), "")
-  check("turning auto-type off drops it", /onAutoTypeEnabledChanged: \{\s*if \(!autoTypeEnabled\) disarmAutoType\(\)/.test(service), "")
+  check("turning auto-type off drops it", /onAutoTypeEnabledChanged: \{\s*if \(!autoTypeEnabled\) \{\s*disarmAutoType\(\)\s*stopAutoType\(\)/.test(service), "")
 }
 
 // --- the TOTP code, around a type --------------------------------------------------------
@@ -351,7 +353,7 @@ check("the IPC answers with requestAutoType()'s result",
   w.queries[0].cb(true, true)
   check("an answer after the watchdog gave up is ignored", w.flashed.indexOf("Auto-typed") === -1, w.flashed.join())
   check("the watchdog moves the sequence on before it reports",
-    /root\.autoTypeSeq \+= 1\s*root\.finishAutoType\(false, "timeout"\)/.test(service), "")
+    /root\.stopAutoType\(\)\s*root\.finishAutoType\(false, "timeout"\)/.test(service), "")
   check("its message covers the helper and the shell's own wtype and bw alike",
     /timed out/.test(Model.autoTypeFailureMessage("timeout")), Model.autoTypeFailureMessage("timeout"))
 }
@@ -401,6 +403,33 @@ check("the lock state is DMS's live IdleService reading, with no poll to go stal
     w.errorMessage === "" && w.notices.length === 0, w.errorMessage)
 }
 
+// Cancellation must reach the helper even when the vault itself stays open.
+{
+  const v = makeVault()
+  v.copyPasswordAndArm(item(v, "a"))
+  v.requestAutoType()
+  v.stopAutoType()
+  eq("stopping a type cancels the helper's wtype", v.helperWrites.filter(x => x.type === "cancelAutoType").length, 1)
+}
+{
+  const v = makeVault()
+  v.missingClipboard = true
+  eq("missing clipboard refuses copy-and-arm", v.copyPasswordAndArm(item(v, "t")), false)
+  check("blocked copy neither arms, closes nor schedules TOTP", !v.autoTypeArmed() && v.calls.length === 0 && v.fetches.length === 0, v.calls.join())
+}
+{
+  const v = makeVault()
+  v.copyPasswordAndArm(item(v, "a"))
+  v.requestAutoType()
+  v.lockOnScreenLock = false
+  v.screenIsLocked = true
+  v.sshAgentProc = { running: false }
+  v.lockVault = () => { throw new Error("vault lock preference ignored") }
+  bind(v, ["onScreenLockState"])
+  v.onScreenLockState("true")
+  check("screen lock cancels typing even when vault auto-lock is disabled", !v.autoTypeBusy && v.helperWrites.some(x => x.type === "cancelAutoType"), "")
+}
+
 // --- the watchdog without the helper -----------------------------------------------------
 
 {
@@ -416,7 +445,7 @@ check("the lock state is DMS's live IdleService reading, with no poll to go stal
   w.requestAutoType()
   check("and so does the bw get password before it", w.calls.indexOf("watchdog.restart") >= 0 && w.autoTypeReadProc.running, w.calls.join())
   check("the watchdog kills a stuck read or wtype rather than leaving the type busy",
-    /if \(autoTypeReadProc\.running\) autoTypeReadProc\.running = false\s*if \(autoTypeProc\.running\) autoTypeProc\.running = false\s*root\.autoTypeSeq \+= 1\s*root\.finishAutoType\(false, "timeout"\)/.test(service), "")
+    /root\.stopAutoType\(\)\s*root\.finishAutoType\(false, "timeout"\)/.test(service), "")
   // As the watchdog does, then the killed processes exit.
   w.autoTypeSeq += 1
   w.finishAutoType(false, "timeout")

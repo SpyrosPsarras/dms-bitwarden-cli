@@ -8436,7 +8436,10 @@ Item {
 
   // Turned off: nothing stays armed. Either way wtype's setup row follows.
   onAutoTypeEnabledChanged: {
-    if (!autoTypeEnabled) disarmAutoType()
+    if (!autoTypeEnabled) {
+      disarmAutoType()
+      stopAutoType()
+    }
     if (depsChecked) checkDependencies()
     if (autoTypeEnabled) inspectAutoTypeKeybind()
   }
@@ -8520,16 +8523,19 @@ Item {
     autoTypeArmTimer.stop()
   }
 
-  // Ends a type in flight without a report: the helper's late answer is
+  // Cancels the helper's typing too, without discarding its vault. Its late answer is
   // ignored (the sequence moves on) and wtype is killed (bash `exec`s it, so
   // the pid is its own); its exit then finds nothing busy.
   function stopAutoType() {
+    if (autoTypeBusy && vaultHelperActive)
+      vaultHelperProc.write(Model.vaultHelperLine("cancelAutoType", {}))
     autoTypeWatchdog.stop()
     autoTypeSeq += 1
     autoTypeBusy = false
     autoTypePendingText = ""
     autoTypeTypedItemId = ""
     autoTypeTypedEpoch = -1
+    if (autoTypeReadProc.running) autoTypeReadProc.running = false
     if (autoTypeProc.running) autoTypeProc.running = false
   }
 
@@ -8541,7 +8547,9 @@ Item {
     closeFilterGroup()
     if (!autoTypeEnabled || status !== "unlocked" || !item || !Model.isLoginItem(item)) return false
     if (!(item.hasPassword !== undefined ? item.hasPassword : Boolean(item.password))) return false
+    if (clipboardMissing()) return false
     withReprompt(item, function() {
+      if (root.clipboardMissing()) return
       root.autoTypeItemId = String(item.id)
       root.autoTypeArmEpoch = root.vaultEpoch
       autoTypeArmTimer.restart()
@@ -8963,6 +8971,10 @@ Item {
   }
 
   function onScreenLockState(raw) {
+    if (root.screenIsLocked) {
+      disarmAutoType()
+      stopAutoType()
+    }
     if (root.screenIsLocked && sshAgentProc.running) revokeAllSshGrants()
     if (!lockOnScreenLock || status !== "unlocked") return
     if (root.screenIsLocked) lockVault()
@@ -10065,9 +10077,7 @@ Item {
     repeat: false
     onTriggered: {
       if (!root.autoTypeBusy) return
-      if (autoTypeReadProc.running) autoTypeReadProc.running = false
-      if (autoTypeProc.running) autoTypeProc.running = false
-      root.autoTypeSeq += 1
+      root.stopAutoType()
       root.finishAutoType(false, "timeout")
     }
   }

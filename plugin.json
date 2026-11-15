@@ -22,7 +22,7 @@
     "jq",
     "rust",
     "wl-clipboard",
-    "pinentry",
+    "nodejs",
     "argon2",
     "libsecret",
     "openssl"
