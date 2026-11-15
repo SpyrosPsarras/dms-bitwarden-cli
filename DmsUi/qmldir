@@ -3,3 +3,4 @@ singleton DmsColor 1.0 DmsColor.qml
 singleton Border 1.0 Border.qml
 singleton Util 1.0 Util.qml
 singleton Tr 1.0 Tr.qml
+BorderSurface 1.0 BorderSurface.qml

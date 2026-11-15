@@ -1,5 +1,65 @@
 # Changelog
 
+## [1.12.0-dms.2] - 2026-11-15
+
+### Fixed
+
+- Replace the obsolete system pinentry dependency with Node.js for the new
+  unlock prompt, including installations using a standalone Bitwarden CLI.
+- Cancel auto-type in the vault helper as well as the shell on timeout,
+  disabling auto-type, and screen lock, even when vault locking on screen lock
+  is disabled. Cancellation preserves the unlocked vault in that mode.
+- Refuse copy-and-arm when clipboard tools are missing, without closing the
+  panel or scheduling a TOTP copy over the previous clipboard value.
+
+- Opening the panel no longer ends SSH approval grants. Its refresh of a list
+  older than a minute read the vault again with the SSH keys, and every key
+  load ends all grants and fails requests waiting for approval. That refresh
+  now leaves keys the agent already holds for the unlocked vault alone. An
+  unlock, account switch or sync still hands them over again.
+- After a failed SSH key load, the next panel refresh hands the agent its keys
+  again.
+
+## [1.12.0-dms.1] - 2026-11-12
+
+- Merge upstream 1.11.7, 1.11.8 and 1.12.0 into the DMS port. The fork's 51
+  commits stay in history; upstream 1.11.6 is recorded as already ported.
+
+### Added
+
+- **Automatic sync** every 15 minutes by default (`autoSyncMinutes`, `0` off),
+  in Settings → General. It holds while an SSH request waits for approval and
+  while any until-screen-lock SSH grant is live, since a sync's reload ends
+  every grant, and resumes once the grant ends. Manual sync is unchanged.
+- **Auto-type** (opt-in, `autoTypeEnabled`): Ctrl+C arms the highlighted login
+  for 30 seconds and `dms ipc call bitwarden autoType` types it with `wtype`.
+  The key screen that writes Hyprland bindings is kept; on niri, bind the IPC
+  command in niri's config. The lock check uses DMS `IdleService`.
+- **The plugin's own unlock prompt** (`pinentry/omarchy-pinentry`) replaces
+  `pinentry-qt`. Its card uses DmsUi controls and the DMS theme the panel
+  passes in, finds the focused output through niri (or Hyprland), and loads
+  no Omarchy, `qs.Commons` or `Quickshell.Hyprland` module. The SSH popup
+  still hides while it asks to unlock.
+
+### Security
+
+- Account email, user id and server stay out of process arguments; remembered
+  two-step methods are keyed by a hash of the address.
+- A forwarded SSH agent connection lists keys without item names.
+- Turning fingerprint unlock off deletes the stored quick-unlock password.
+- The pinentry prompt's private directory is removed before it answers, and
+  one left by a killed prompt is swept by the next.
+- Upstream's unlock-race, tokio FIFO, helper-loss notice and wiped helper
+  reply fixes.
+
+### Fixed
+
+- Enter saves a new or edited item from a text field again.
+- Generator options are remembered, in the DMS plugin settings.
+- Ctrl+C in the search box arms the highlighted login with auto-type on.
+- Installing `bitwarden-cli` over a conflicting Node.js provider says to
+  answer pacman's question in the install terminal.
+
 ## [1.11.6-dms.7] - 2026-11-11
 
 ### Added

@@ -31,6 +31,7 @@ for p in repo.glob('*.qml'):
  if p.name not in ('BarWidget.qml','Settings.qml'):shutil.copy(p,tmp/p.name)
 for p in repo.glob('*.js'): shutil.copy(p,tmp/p.name)
 shutil.copytree(repo/'DmsUi',tmp/'DmsUi',dirs_exist_ok=True)
+shutil.copytree(repo/'pinentry',tmp/'pinentry',dirs_exist_ok=True)
 # Load the actual installed native controls; never start host services.
 dms=args.dms_dir
 if dms is None:
@@ -152,7 +153,7 @@ Rectangle {
 panel_stub = tmp/'DmsUi/KeyboardPanel.qml'
 panel_stub.write_text(panel_stub.read_text().replace('Math.min(value, 520)', f'Math.min(value, {args.panel_width})'))
 for component in (tmp/'DmsUi').glob('*.qml'):
- if component.stem not in ['Style','DmsColor','Border','Util','Tr']:
+ if component.stem not in ['Style','DmsColor','Border','Util','Tr','BorderSurface']:
   with (tmp/'DmsUi/qmldir').open('a') as f:f.write(f'{component.stem} 1.0 {component.name}\n')
 fixture=json.loads((repo/'demo/fixtures.json').read_text())
 fixture['items']=[x for x in fixture['items'] if x.get('name') in ['GitHub','Home Assistant','Acme Grafana','Acme VPN','Dana Demo','Demo Card']]

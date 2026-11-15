@@ -23,6 +23,33 @@ check("bar instances reach that daemon", /pluginDaemonInstances\[pluginId\]/.tes
 check("view attaches and detaches", /vault\.attachView\(root\)/.test(panel) && /vault\.detachView\(root\)/.test(panel), "view lifecycle missing")
 check("DMS preferences update the service", /onSavedSettingsChanged: updateSettings/.test(service) && /pluginService\.savePluginData/.test(service), "DMS settings missing")
 
+// --- a late shared service ---------------------------------------------------
+//
+//
+// Private was decided because the service was not published by the timeout;
+// a slow shell publishes it later, and a private vault per monitor would make
+// a lock on one monitor local to it.
+
+const S = Model.vaultHandOverStep
+const poll = Model.vaultHandOverPollMs()
+check("the private host keeps asking, slower than the first lookup",
+  poll >= 500 && poll <= 5000, String(poll))
+check("no shared service is nothing to do",
+  S(false, {}) === "none" && S(false, { held: true }) === "none", "expected none")
+check("a found service is adopted by an empty private vault",
+  S(true, {}) === "adopt" && S(true, { busy: false, held: false, locking: false }) === "adopt", "expected adopt")
+check("an unlocked private vault is locked before the hand-over",
+  S(true, { held: true }) === "lock", "expected lock")
+check("a pinentry or authentication in flight is not cut short",
+  S(true, { busy: true }) === "wait" && S(true, { busy: true, held: true }) === "wait", "expected wait")
+check("the lock's own run is waited for before the vault is retired",
+  S(true, { locking: true }) === "wait", "expected wait")
+check("only a real true counts",
+  S(true, { busy: "yes", held: 1, locking: "x" }) === "adopt", "expected adopt")
+
+// DMS's daemon owns the one service (above), so no view holds a private
+// vault for Panel.qml to hand over.
+
 // --- the service's view registry --------------------------------------------
 
 check("attaching is idempotent",
@@ -149,7 +176,7 @@ const unqualified = [...vaultMembers].filter(n => !shared.has(n)
 check("Panel.qml reaches every vault member through root.vault",
   unqualified.length === 0, "reached another way: " + unqualified.join(", "))
 
-for (const file of ["CustomFieldsEditor.qml", "SshAgentSettings.qml", "SshApprovalPopup.qml",
+for (const file of ["AutoTypeKeybind.qml", "CustomFieldsEditor.qml", "SshAgentSettings.qml", "SshApprovalPopup.qml",
                     "SshApprovalScreen.qml", "SshUnlockScreen.qml", "UnlockForm.qml", "RepromptConfirm.qml"]) {
   const src = code(read(file))
   const viaPanel = [...src.matchAll(/\bpanel\.([A-Za-z_]\w*)/g)].map(m => m[1])
@@ -162,7 +189,8 @@ for (const file of ["CustomFieldsEditor.qml", "SshAgentSettings.qml", "SshApprov
 // A Connections block listening for a vault member's change signal has to
 // target the vault; aimed at the view it silently never fires.
 const handlerTargets = []
-for (const [file, src, vaultRef] of [["Panel.qml", panel, "root.vault"], ["CustomFieldsEditor.qml", read("CustomFieldsEditor.qml"), null],
+for (const [file, src, vaultRef] of [["Panel.qml", panel, "root.vault"], ["AutoTypeKeybind.qml", read("AutoTypeKeybind.qml"), null],
+    ["CustomFieldsEditor.qml", read("CustomFieldsEditor.qml"), null],
     ["SshAgentSettings.qml", read("SshAgentSettings.qml"), null], ["SshApprovalPopup.qml", read("SshApprovalPopup.qml"), null],
     ["SshApprovalScreen.qml", read("SshApprovalScreen.qml"), null], ["SshUnlockScreen.qml", read("SshUnlockScreen.qml"), null],
     ["UnlockForm.qml", read("UnlockForm.qml"), null], ["RepromptConfirm.qml", read("RepromptConfirm.qml"), null]]) {
@@ -200,7 +228,8 @@ const vaultApi = new Set([
   "visible", "enabled", "parent", "objectName", "destroy",
 ])
 const unreachable = []
-for (const [file, src] of [["Panel.qml", panel], ["CustomFieldsEditor.qml", read("CustomFieldsEditor.qml")],
+for (const [file, src] of [["Panel.qml", panel], ["AutoTypeKeybind.qml", read("AutoTypeKeybind.qml")],
+    ["CustomFieldsEditor.qml", read("CustomFieldsEditor.qml")],
     ["SshAgentSettings.qml", read("SshAgentSettings.qml")], ["SshApprovalPopup.qml", read("SshApprovalPopup.qml")],
     ["SshApprovalScreen.qml", read("SshApprovalScreen.qml")], ["SshUnlockScreen.qml", read("SshUnlockScreen.qml")],
     ["UnlockForm.qml", read("UnlockForm.qml")], ["RepromptConfirm.qml", read("RepromptConfirm.qml")]]) {

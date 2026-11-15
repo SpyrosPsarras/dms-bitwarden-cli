@@ -28,6 +28,7 @@ TestCase {
   SignalSpy { id: secretEdits; target: secret; signalName: "textEdited" }
 
   Column {
+    id: fields
     spacing: 8
     LineField { id: plain; width: 300 }
     LineField { id: next; width: 300 }
@@ -91,6 +92,8 @@ TestCase {
     nested.focus = false
     edits.clear()
     secretEdits.clear()
+    // Re-shown plain pushes next down only at the next polish; a click before it hits next.
+    waitForItemPolished(fields)
   }
 
   function visibleHints(item, text) {

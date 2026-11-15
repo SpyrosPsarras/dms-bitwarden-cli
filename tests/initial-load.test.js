@@ -33,7 +33,7 @@ check("a remembered session reads the list alongside bw status",
 const startRead = bodyOf("startVaultListRead")
 check("an early read never feeds the SSH agent",
   /listReadEarly\s*=\s*status\s*!==\s*"unlocked"/.test(startRead)
-    && /useAgent\s*=\s*!retrying\s*&&\s*!listReadEarly/.test(startRead),
+    && /useAgent\s*=\s*!withoutAgent\s*&&\s*!listReadEarly/.test(startRead),
   startRead)
 const loadItemsBody = bodyOf("loadItems")
 check("a confirmed load waits on the early read instead of starting another",
@@ -101,6 +101,16 @@ const sync = bodyOf("onSyncFinished")
 check("a successful server sync also reloads items before metadata",
   /beginInitialVaultLoad\(/.test(sync) && !/loadOrganizations\(/.test(sync) && !/loadFolders\(/.test(sync), sync)
 
+const syncButton = panelSrc.slice(panelSrc.indexOf('text: "Sync"'), panelSrc.indexOf('text: "Send"'))
+// A user's sync only: `userSyncing` is isSyncing without backgroundSync
+// (tests/auto-sync.test.js), so an automatic sync says nothing.
+check("the sync button follows only a user's sync",
+  /iconSpinning:\s*root\.userSyncing/.test(syncButton) && /enabled:\s*!root\.userSyncing/.test(syncButton),
+  syncButton)
+check("the panel header reports only a user's sync",
+  /if\s*\(root\.userSyncing\)\s*return\s*"Syncing\.\.\."/.test(panelSrc)
+    && /readonly property bool userSyncing: root\.isSyncing && !root\.backgroundSync/.test(panelSrc),
+  "missing Syncing... header state")
 
 const listProcessStart = panelSrc.indexOf("id: listProc")
 const listProcess = listProcessStart === -1 ? "" : panelSrc.slice(listProcessStart, listProcessStart + 900)
