@@ -434,7 +434,7 @@
     "Stored password no longer valid. Unlock with your master password to re-enable fingerprint unlock.": "Gespeichertes Passwort nicht mehr gültig. Mit dem Master-Passwort entsperren, um den Fingerabdruck erneut zu aktivieren.",
     "Your master password changed, so the PIN no longer works. Unlock with your password and set a new PIN.": "Dein Master-Passwort wurde geändert. Entsperre mit dem Passwort und richte eine neue PIN ein.",
     "You are not logged in. Please log in below.": "Du bist nicht angemeldet. Bitte unten anmelden.",
-    "Unlock failed: invalid master password": "Entsperren fehlgeschlagen: ungültiges Master-Passwort",
+    "Unlock failed. Try again.": "Entsperren fehlgeschlagen. Bitte erneut versuchen.",
     "Unlock did not return a session key": "Beim Entsperren wurde kein Sitzungsschlüssel zurückgegeben",
     "Vault unlocked successfully!": "Tresor entsperrt!",
     "Vault locked": "Tresor gesperrt",

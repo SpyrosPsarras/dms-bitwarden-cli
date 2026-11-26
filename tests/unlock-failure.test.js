@@ -64,8 +64,17 @@ for (const from of ["fingerprint", "pin", "fido"]) {
     const w = makeVault(from, fromEnvelope)
     w.onUnlockOutput("", "Invalid master password.", 1)
     check(`${label}: a wrong password still marks the method stale`,
-      w.cleared.length === 1 || w.rotationOldPassword !== "", JSON.stringify(w))
+      fromEnvelope ? w.cleared.length === 0 && w.rotationOldPassword !== ""
+        : w.cleared.join() === from && w.rotationOldPassword === "",
+      JSON.stringify({ cleared: w.cleared, rotation: w.rotationOldPassword }))
   }
+}
+
+for (const stderr of ["", "ERROR bitwarden_core::x: noise"]) {
+  const v = makeVault("fingerprint", true)
+  v.onUnlockOutput("", stderr, 1)
+  check(`a failure with no message (${JSON.stringify(stderr)}) does not blame the password`,
+    v.errorMessage !== "" && !/master password/i.test(v.errorMessage), v.errorMessage)
 }
 
 {

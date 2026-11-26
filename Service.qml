@@ -6377,7 +6377,7 @@ Item {
         errorMessage = Tr.text("You are not logged in. Please log in below.")
       } else {
         errorMessage = wrongPassword ? "That is not your master password."
-          : (Model.bwErrorText(err) || Tr.text("Unlock failed: invalid master password"))
+          : (Model.bwErrorText(err) || Tr.text("Unlock failed. Try again."))
         Qt.callLater(prepareUnlock)
       }
     }
