@@ -2508,7 +2508,11 @@ function isWrongMasterPassword(stderrText) {
 
 // bw's stderr without the SDK's log lines ("ERROR bitwarden_crypto::...:"),
 // which are not meant for the person reading the panel.
+// From 2026.9, bw crashes after unlocking when the server rejects its key id
+// report (Vaultwarden before 1.37.4 has no endpoint), then skips it for 24 h.
 function bwErrorText(stderrText) {
+  if (/KeyIdBackfillError/.test(String(stderrText)))
+    return "Bitwarden CLI crashed after unlocking while reporting the key ID to the server. Try again."
   return String(stderrText || "").replace(/\u001b\[[0-9;]*m/g, "").split("\n")
     .filter(function(line) { return !/^\s*(ERROR|WARN|INFO|DEBUG|TRACE)\s+bitwarden_\w+(::\w+)*\s*:/.test(line) })
     .map(function(line) { return line.trim() }).filter(Boolean).join("\n")

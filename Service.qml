@@ -6279,8 +6279,16 @@ Item {
     } else {
       // A master password typed into pinentry that `bw` refused: forgotten,
       // and asked for again. Any other failure is shown as it is.
-      var askAgain = pinentryMasterName !== "" && Model.isWrongMasterPassword(err)
+      var wrongPassword = Model.isWrongMasterPassword(err)
+      var askAgain = pinentryMasterName !== "" && wrongPassword
       pinentryMasterName = ""
+      // A quick unlock that failed for another reason keeps its stored secret.
+      if (!wrongPassword) {
+        pendingUnlockFrom = ""
+        fingerprintFromEnvelope = false
+        pinFromEnvelope = false
+        fidoFromEnvelope = false
+      }
       var fromEnvelope = (pendingUnlockFrom === "fingerprint" && fingerprintFromEnvelope)
         || (pendingUnlockFrom === "pin" && pinFromEnvelope)
         || (pendingUnlockFrom === "fido" && fidoFromEnvelope)
@@ -6368,7 +6376,7 @@ Item {
         currentScreen = "login"
         errorMessage = Tr.text("You are not logged in. Please log in below.")
       } else {
-        errorMessage = Model.isWrongMasterPassword(err) ? "That is not your master password."
+        errorMessage = wrongPassword ? "That is not your master password."
           : (Model.bwErrorText(err) || Tr.text("Unlock failed: invalid master password"))
         Qt.callLater(prepareUnlock)
       }

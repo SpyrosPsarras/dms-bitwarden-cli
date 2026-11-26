@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- A fingerprint, PIN or FIDO2 unlock that `bw` fails for a reason other than
+  the password keeps the stored password or PIN and shows the error. Before,
+  any failure, such as a network error, counted as a changed master password,
+  and the older stored formats were deleted.
+- `bw` 2026.9 and later crashes after unlocking when the server rejects its
+  key ID report (Vaultwarden before 1.37.4). The panel now shows one line
+  asking to try again instead of the Node.js stack trace.
+
 ## [1.12.0-dms.2] - 2026-11-15
 
 ### Fixed
